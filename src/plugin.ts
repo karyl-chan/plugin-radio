@@ -1,8 +1,10 @@
 import {
+  type APIEmbed,
   type CommandContext,
   type CommandReply,
   type ComponentContext,
   type ComponentReply,
+  type MessageActionRow,
   definePlugin,
   definePluginCapability,
   definePluginCommand,
@@ -143,8 +145,11 @@ async function webuiUrlFor(
 }
 
 /** Discord component-v1 action row with a single Link button. */
-function linkButtonRow(label: string, url: string): unknown {
-  return { type: 1, components: [{ type: 2, style: 5, label, url }] };
+function linkButtonRow(label: string, url: string): MessageActionRow {
+  return {
+    type: 1,
+    components: [{ type: 2, style: 5, label, url }],
+  } as MessageActionRow;
 }
 
 /**
@@ -158,7 +163,7 @@ function syncNowPlaying(
   guildId: string,
   botRpc: BotRpcFn,
   opts?: { status?: nowPlaying.VoiceStatusLike; skipMessageId?: string },
-): Promise<{ embeds: unknown[]; components: unknown[] } | null> {
+): Promise<{ embeds: APIEmbed[]; components: MessageActionRow[] } | null> {
   return nowPlaying.sync(guildId, botRpc, opts).catch(() => null);
 }
 
@@ -190,8 +195,12 @@ function startTrack(
   guildId: string,
   track: Track,
 ): Promise<PlayOutcome> {
+  // Lockdown L-2: typed voice facade. The internal `playTrack` helper
+  // still takes a "play(url) → Promise" closure so the rest of the
+  // radio call graph (advance-loop, playback-actions) stays unchanged
+  // — we just bridge it to ctx.voice.play at this top edge.
   return playTrack(track, (url) =>
-    ctx.botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
+    ctx.voice.play({ guildId, url }),
   );
 }
 
@@ -270,21 +279,15 @@ function controlHandler(
     const guildId = ctx.guildId;
     if (!guildId) return; // buttons only live on guild messages
     const nudge = (content: string): Promise<unknown | null> =>
-      ctx
-        .botRpc("/api/plugin/interactions.followup", {
-          interaction_token: ctx.interactionToken,
+      ctx.discord.interactions
+        .followup({
+          interactionToken: ctx.interactionToken,
           content,
           ephemeral: true,
         })
         .catch(() => null);
 
-    const status = (await ctx.botRpc("/api/plugin/voice.status", {
-      guild_id: guildId,
-    }).catch(() => null)) as {
-      connected?: boolean;
-      channelId?: string | null;
-      paused?: boolean;
-    } | null;
+    const status = await ctx.voice.status(guildId).catch(() => null);
     if (!status || !status.connected || !status.channelId) {
       await nudge("⚠ 我已經不在語音頻道了，這個面板已失效。");
       return;
@@ -603,9 +606,9 @@ export default function buildPlugin() {
                     // Same embed + control buttons as the public now-playing
                     // message, but ephemeral and not auto-updated — only its
                     // own buttons edit it.
-                    const status = (await ctx.botRpc("/api/plugin/voice.status", {
-                      guild_id: guildId,
-                    })) as { channelId?: string | null; paused?: boolean } | null;
+                    const status = await ctx.voice
+                      .status(guildId)
+                      .catch(() => null);
                     const webuiUrl = await webuiUrlFor(
                       ctx.botRpc,
                       userId,
@@ -806,13 +809,12 @@ export default function buildPlugin() {
                       ? "\n♾️ Autoplay on — I'll keep going with YouTube recommendations when the queue runs out."
                       : "";
                     const joinFirst = async (): Promise<string | null> => {
-                      const joined = await ctx.botRpc("/api/plugin/voice.join", {
-                        guild_id: guildId,
-                        user_id: userId,
-                      });
-                      return joined
-                        ? null
-                        : "⚠ Could not join voice — make sure you're in a voice channel and the bot has permission.";
+                      try {
+                        await ctx.voice.join({ guildId, userId });
+                        return null;
+                      } catch {
+                        return "⚠ Could not join voice — make sure you're in a voice channel and the bot has permission.";
+                      }
                     };
 
                     if (isYouTubePlaylistUrl(source)) {

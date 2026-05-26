@@ -21,6 +21,7 @@
  * own buttons edit.
  */
 import { createHash } from "node:crypto";
+import type { APIEmbed, MessageActionRow } from "@karyl-chan/plugin-sdk";
 import { PLUGIN_KEY } from "./constants.js";
 import type { BotRpc } from "./playback-actions.js";
 import { nowPlayingComponents, renderNowPlayingEmbed } from "./format.js";
@@ -94,7 +95,7 @@ function render(
   guildId: string,
   status: VoiceStatusLike,
   token: string | null,
-): { embeds: unknown[]; components: unknown[]; hash: string } {
+): { embeds: APIEmbed[]; components: MessageActionRow[]; hash: string } {
   const embeds = [
     renderNowPlayingEmbed(guildId, {
       channelId: status.channelId ?? null,
@@ -130,7 +131,7 @@ export async function sync(
   guildId: string,
   botRpc: BotRpc,
   opts?: { status?: VoiceStatusLike; skipMessageId?: string },
-): Promise<{ embeds: unknown[]; components: unknown[] } | null> {
+): Promise<{ embeds: APIEmbed[]; components: MessageActionRow[] } | null> {
   let status = opts?.status ?? null;
   if (!status) {
     status = (await botRpc("/api/plugin/voice.status", {

@@ -4,7 +4,7 @@
  * mutation — derived purely from the queue state (and the bits of voice
  * status / WebUI link the caller passes in).
  */
-import { componentCustomId } from "@karyl-chan/plugin-sdk";
+import { componentCustomId, type MessageActionRow } from "@karyl-chan/plugin-sdk";
 import {
   type LoopMode,
   type Track,
@@ -173,7 +173,7 @@ export function nowPlayingComponents(
   guildId: string,
   status: { paused?: boolean },
   webuiUrl: string | null,
-): unknown[] {
+): MessageActionRow[] {
   const s = getState(guildId);
   const loop: LoopMode = s?.loop ?? "off";
   const autoplay = s?.autoplay ?? false;
@@ -189,7 +189,7 @@ export function nowPlayingComponents(
     emoji: { name: emoji },
     ...(opts?.disabled ? { disabled: true } : {}),
   });
-  const rows: unknown[] = [
+  const rows: MessageActionRow[] = [
     {
       type: 1,
       components: [
@@ -199,12 +199,12 @@ export function nowPlayingComponents(
         btn("stop", "⏹️"),
         btn("loop", "🔁", { style: loop === "off" ? 2 : 1 }),
       ],
-    },
+    } as unknown as MessageActionRow,
   ];
   const row2: unknown[] = [btn("autoplay", "♾️", { style: autoplay ? 1 : 2 })];
   if (webuiUrl) {
     row2.push({ type: 2, style: 5, label: "🎛 WebUI", url: webuiUrl });
   }
-  rows.push({ type: 1, components: row2 });
+  rows.push({ type: 1, components: row2 } as unknown as MessageActionRow);
   return rows;
 }
