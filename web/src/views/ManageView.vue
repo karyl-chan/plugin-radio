@@ -329,7 +329,13 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* AppTabs' scoped CSS sets `flex: 1` on its root so it fills a flex
+   parent (the bot frontend pattern where the tab strip IS the page).
+   ManageView uses it as a header strip above other content, so undo
+   the flex grow — otherwise it consumes the remaining vertical space
+   in `.app-wrap` and shoves the tracks / playlists lists to the bottom. */
 .manage-tabs {
+  flex: 0 0 auto;
   margin-bottom: 0.85rem;
 }
 

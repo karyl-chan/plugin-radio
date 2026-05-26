@@ -1,7 +1,6 @@
 import { createApp, h } from "vue";
 import { createPinia } from "pinia";
 import "@karyl-chan/ui/tokens.css";
-import "@karyl-chan/ui/reset.css";
 import "@karyl-chan/ui/use-drawer.css";
 import "@karyl-chan/ui/use-popover.css";
 import "./styles/global.css";
