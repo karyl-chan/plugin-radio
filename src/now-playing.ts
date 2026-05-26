@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import type { APIEmbed, MessageActionRow } from "@karyl-chan/plugin-sdk";
 import { PLUGIN_KEY } from "./constants.js";
-import type { BotRpc } from "./playback-actions.js";
+import { runtime } from "./runtime.js";
 import { nowPlayingComponents, renderNowPlayingEmbed } from "./format.js";
 
 /** WebUI-link session token lifetime + how early to re-mint it. */
@@ -62,15 +62,14 @@ const messages = new Map<string, MsgState>();
 const tokens = new Map<string, TokenState>();
 
 /** Mint (or reuse) the guild's WebUI-link session token. */
-async function getSessionToken(
-  guildId: string,
-  botRpc: BotRpc,
-): Promise<string | null> {
+async function getSessionToken(guildId: string): Promise<string | null> {
   const cached = tokens.get(guildId);
   if (cached && cached.expiresAt - Date.now() > TOKEN_REFRESH_MARGIN_MS) {
     return cached.token;
   }
-  const res = (await botRpc("/api/plugin/auth.session", {
+  // auth.session has no typed wrapper in the SDK's `discord` / `voice`
+  // facades yet — fall back to the raw botRpc surface.
+  const res = (await runtime().botRpc("/api/plugin/auth.session", {
     // `kind:"session"` tokens ship no capabilities and are authorised
     // purely by the embedded guild_id, so the user_id is informational —
     // there's no real "owner" of the public message.
@@ -129,47 +128,42 @@ function render(
  */
 export async function sync(
   guildId: string,
-  botRpc: BotRpc,
   opts?: { status?: VoiceStatusLike; skipMessageId?: string },
 ): Promise<{ embeds: APIEmbed[]; components: MessageActionRow[] } | null> {
   let status = opts?.status ?? null;
   if (!status) {
-    status = (await botRpc("/api/plugin/voice.status", {
-      guild_id: guildId,
-    }).catch(() => null)) as VoiceStatusLike | null;
+    status = (await runtime()
+      .voice.status(guildId)
+      .catch(() => null)) as VoiceStatusLike | null;
   }
   if (!status || !status.connected || !status.channelId) {
     // Not in voice — there's no session to show; clean up any message.
-    await teardown(guildId, botRpc);
+    await teardown(guildId);
     return null;
   }
   const channelId = status.channelId;
-  const token = await getSessionToken(guildId, botRpc);
+  const token = await getSessionToken(guildId);
   const { embeds, components, hash } = render(guildId, status, token);
   const cur = messages.get(guildId);
+  const discord = runtime().discord;
 
   // No message yet — send one.
   if (!cur) {
-    const res = (await botRpc("/api/plugin/messages.send", {
-      channel_id: channelId,
-      embeds,
-      components,
-    }).catch(() => null)) as { id?: string } | null;
+    const res = await discord.messages
+      .send({ channelId, embeds, components })
+      .catch(() => null);
     if (res?.id) messages.set(guildId, { channelId, messageId: res.id, renderHash: hash });
     return { embeds, components };
   }
 
   // Bot moved to a different channel — drop the old message, send fresh.
   if (cur.channelId !== channelId) {
-    await botRpc("/api/plugin/messages.delete", {
-      channel_id: cur.channelId,
-      message_id: cur.messageId,
-    }).catch(() => null);
-    const res = (await botRpc("/api/plugin/messages.send", {
-      channel_id: channelId,
-      embeds,
-      components,
-    }).catch(() => null)) as { id?: string } | null;
+    await discord.messages
+      .delete({ channelId: cur.channelId, messageId: cur.messageId })
+      .catch(() => null);
+    const res = await discord.messages
+      .send({ channelId, embeds, components })
+      .catch(() => null);
     if (res?.id) messages.set(guildId, { channelId, messageId: res.id, renderHash: hash });
     else messages.delete(guildId);
     return { embeds, components };
@@ -181,12 +175,9 @@ export async function sync(
     if (cur.messageId === opts?.skipMessageId) {
       cur.renderHash = hash;
     } else {
-      const res = (await botRpc("/api/plugin/messages.edit", {
-        channel_id: channelId,
-        message_id: cur.messageId,
-        embeds,
-        components,
-      }).catch(() => null)) as { id?: string } | null;
+      const res = await discord.messages
+        .edit({ channelId, messageId: cur.messageId, embeds, components })
+        .catch(() => null);
       if (res?.id) cur.renderHash = hash;
       else messages.delete(guildId); // edit failed (deleted?) — re-send next time
     }
@@ -195,18 +186,14 @@ export async function sync(
 }
 
 /** Delete the guild's now-playing message (if any) and forget its state. */
-export async function teardown(
-  guildId: string,
-  botRpc: BotRpc,
-): Promise<void> {
+export async function teardown(guildId: string): Promise<void> {
   const cur = messages.get(guildId);
   messages.delete(guildId);
   tokens.delete(guildId);
   if (cur) {
-    await botRpc("/api/plugin/messages.delete", {
-      channel_id: cur.channelId,
-      message_id: cur.messageId,
-    }).catch(() => null);
+    await runtime()
+      .discord.messages.delete({ channelId: cur.channelId, messageId: cur.messageId })
+      .catch(() => null);
   }
 }
 

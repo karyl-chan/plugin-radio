@@ -21,8 +21,7 @@ import {
 import { doStop } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
-
-type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
+import { runtime, type BotRpc } from "./runtime.js";
 
 // Poll fast so a finished track is followed up within ~1 s rather than up
 // to 5 s. Cheap — `voice.status` is an in-memory lookup on the bot; the
@@ -209,7 +208,6 @@ type VoiceStatus = {
  */
 async function probePhase(
   guildId: string,
-  botRpc: BotRpc,
   log: Logger,
   seenGuilds: Set<string>,
 ): Promise<{ status: VoiceStatus; seedId: string | null } | null> {
@@ -217,12 +215,12 @@ async function probePhase(
     if (isIdle(guildId)) {
       seenGuilds.delete(guildId);
       prefetched.delete(guildId);
-      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+      await nowPlaying.teardown(guildId).catch(() => {});
       return null;
     }
-    const status = (await botRpc("/api/plugin/voice.status", {
-      guild_id: guildId,
-    })) as VoiceStatus | null;
+    const status = (await runtime()
+      .voice.status(guildId)
+      .catch(() => null)) as VoiceStatus | null;
     if (!status) {
       // RPC blip — record the failure and start / extend the
       // exponential backoff so a multi-second bot outage doesn't see
@@ -235,7 +233,7 @@ async function probePhase(
       seenGuilds.delete(guildId);
       prefetched.delete(guildId);
       lastListenerAt.delete(guildId);
-      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+      await nowPlaying.teardown(guildId).catch(() => {});
       return null;
     }
     // Auto-end the session once the bot's voice channel has been
@@ -251,8 +249,8 @@ async function probePhase(
         seenGuilds.delete(guildId);
         prefetched.delete(guildId);
         lastListenerAt.delete(guildId);
-        await doStop(guildId, botRpc).catch(() => {});
-        await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+        await doStop(guildId).catch(() => {});
+        await nowPlaying.teardown(guildId).catch(() => {});
         return null;
       }
       if (since === undefined) lastListenerAt.set(guildId, now);
@@ -270,7 +268,6 @@ async function probePhase(
  */
 async function advancePhase(
   guildId: string,
-  botRpc: BotRpc,
   log: Logger,
   seenGuilds: Set<string>,
   status: VoiceStatus,
@@ -291,8 +288,7 @@ async function advancePhase(
             : undefined;
         const outcome = await playTrack(
           candidate.track,
-          (url) =>
-            botRpc("/api/plugin/voice.play", { guild_id: guildId, url }),
+          (url) => runtime().voice.play({ guildId, url }),
           hint,
         );
         if (outcome.ok) {
@@ -326,7 +322,7 @@ async function advancePhase(
     if (isIdle(guildId)) {
       seenGuilds.delete(guildId);
       prefetched.delete(guildId);
-      await nowPlaying.teardown(guildId, botRpc).catch(() => {});
+      await nowPlaying.teardown(guildId).catch(() => {});
       return;
     }
     // Pre-resolve the (new) next-up track so the next hand-off is
@@ -334,13 +330,12 @@ async function advancePhase(
     ensurePrefetch(guildId);
     // Keep the public now-playing message current (cheap — hash-
     // gated; reuses the voice status we already fetched).
-    await nowPlaying.sync(guildId, botRpc, { status }).catch(() => {});
+    await nowPlaying.sync(guildId, { status }).catch(() => {});
   });
 }
 
 async function processGuild(
   guildId: string,
-  botRpc: BotRpc,
   log: Logger,
   seenGuilds: Set<string>,
 ): Promise<void> {
@@ -364,7 +359,7 @@ async function processGuild(
     //
     // Splitting the autoplay yt-dlp out of the lock prevents a 10 s
     // mix fetch from blocking every other op on the guild.
-    const probe = await probePhase(guildId, botRpc, log, seenGuilds);
+    const probe = await probePhase(guildId, log, seenGuilds);
     if (!probe) return;
     let recs: Track[] | null = null;
     if (probe.seedId) {
@@ -381,14 +376,16 @@ async function processGuild(
     }
     const refill =
       probe.seedId && recs ? { seedId: probe.seedId, recs } : null;
-    await advancePhase(guildId, botRpc, log, seenGuilds, probe.status, refill);
+    await advancePhase(guildId, log, seenGuilds, probe.status, refill);
   } finally {
     inFlight.delete(guildId);
   }
 }
 
 export function startAdvanceLoop(
-  botRpc: BotRpc,
+  // Kept for source compatibility with index.ts; the loop reads voice/
+  // discord from the module-level runtime now, so this arg is unused.
+  _botRpc: BotRpc,
   log: Logger,
   seenGuilds: Set<string>,
 ): NodeJS.Timeout {
@@ -396,7 +393,7 @@ export function startAdvanceLoop(
     const snapshot = [...seenGuilds];
     void Promise.all(
       snapshot.map((guildId) =>
-        processGuild(guildId, botRpc, log, seenGuilds).catch((err) => {
+        processGuild(guildId, log, seenGuilds).catch((err) => {
           log.warn("advance: processGuild errored", {
             guildId,
             err: String(err),

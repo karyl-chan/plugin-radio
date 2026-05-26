@@ -24,13 +24,15 @@ import {
   reset,
 } from "./queue.js";
 import { playTrack } from "./resolver.js";
+import { runtime } from "./runtime.js";
 
+/** Re-exported for callers that still want the raw botRpc surface. */
 export type BotRpc = (path: string, body?: unknown) => Promise<unknown | null>;
 
 const voicePlay =
-  (botRpc: BotRpc, guildId: string) =>
+  (guildId: string) =>
   (url: string): Promise<unknown | null> =>
-    botRpc("/api/plugin/voice.play", { guild_id: guildId, url });
+    runtime().voice.play({ guildId, url });
 
 /** Cycle the loop mode: off → track → queue → off. */
 export function cycleLoopMode(mode: LoopMode): LoopMode {
@@ -52,11 +54,8 @@ export type NextResult =
  * be resolved (deleted / private playlist items) — up to a few hops.
  * Asks the bot to stop playback when nothing's left to play.
  */
-export async function doNext(
-  guildId: string,
-  botRpc: BotRpc,
-): Promise<NextResult> {
-  const play = voicePlay(botRpc, guildId);
+export async function doNext(guildId: string): Promise<NextResult> {
+  const play = voicePlay(guildId);
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = peekNext(guildId);
     if (!candidate) {
@@ -65,9 +64,7 @@ export async function doNext(
       // null and NowPlayingCard shows "Nothing playing" instead of the
       // last-played track frozen mid-row.
       endSession(guildId);
-      await botRpc("/api/plugin/voice.stop", { guild_id: guildId }).catch(
-        () => null,
-      );
+      await runtime().voice.stop(guildId).catch(() => null);
       return { kind: "queue-empty" };
     }
     const o = await playTrack(candidate.track, play);
@@ -93,13 +90,10 @@ export type PrevResult =
   | { kind: "no-history" };
 
 /** Step back to the most recently played track. */
-export async function doPrev(
-  guildId: string,
-  botRpc: BotRpc,
-): Promise<PrevResult> {
+export async function doPrev(guildId: string): Promise<PrevResult> {
   const candidate = peekPrev(guildId);
   if (!candidate) return { kind: "no-history" };
-  const o = await playTrack(candidate.track, voicePlay(botRpc, guildId));
+  const o = await playTrack(candidate.track, voicePlay(guildId));
   if (o.ok) {
     commitCursor(guildId, candidate.idx);
     return { kind: "playing", track: o.track };
@@ -128,11 +122,10 @@ export type JumpResult =
 export async function doJump(
   guildId: string,
   qid: number,
-  botRpc: BotRpc,
 ): Promise<JumpResult> {
   const candidate = peekQid(guildId, qid);
   if (!candidate) return { kind: "no-such-qid" };
-  const o = await playTrack(candidate.track, voicePlay(botRpc, guildId));
+  const o = await playTrack(candidate.track, voicePlay(guildId));
   if (o.ok) {
     commitCursor(guildId, candidate.idx);
     return { kind: "playing", track: o.track };
@@ -142,11 +135,9 @@ export async function doJump(
 }
 
 /** Stop playback, clear the queue, leave voice. */
-export async function doStop(guildId: string, botRpc: BotRpc): Promise<void> {
-  await Promise.all([
-    botRpc("/api/plugin/voice.stop", { guild_id: guildId }),
-    botRpc("/api/plugin/voice.leave", { guild_id: guildId }),
-  ]);
+export async function doStop(guildId: string): Promise<void> {
+  const voice = runtime().voice;
+  await Promise.all([voice.stop(guildId), voice.leave(guildId)]);
   reset(guildId);
 }
 
@@ -156,12 +147,10 @@ export async function doStop(guildId: string, botRpc: BotRpc): Promise<void> {
  */
 export async function doPause(
   guildId: string,
-  botRpc: BotRpc,
   paused?: boolean,
 ): Promise<{ paused: boolean }> {
-  const res = (await botRpc("/api/plugin/voice.pause", {
-    guild_id: guildId,
-    ...(paused !== undefined ? { paused } : {}),
-  })) as { paused?: boolean } | null;
+  const res = (await runtime()
+    .voice.pause(paused !== undefined ? { guildId, paused } : { guildId })
+    .catch(() => null)) as { paused?: boolean } | null;
   return { paused: res?.paused === true };
 }

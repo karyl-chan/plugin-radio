@@ -12,8 +12,8 @@ importers:
         specifier: ^9.0.3
         version: 9.4.0
       '@karyl-chan/plugin-sdk':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.4.0
+        version: 0.4.0(discord-api-types@0.38.48)(vue@3.5.34(typescript@5.9.3))
       better-sqlite3:
         specifier: ^12.10.0
         version: 12.10.0
@@ -413,9 +413,15 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@karyl-chan/plugin-sdk@0.2.0':
-    resolution: {integrity: sha512-Vt4sVMyTsXqYueLfPE3ekLGZ8eT0t8gMjtIRMJ0HAW+AdeEGRm1Oi2bBNuPd+gshnKhyuKCB/VKn10g6rChNJw==}
+  '@karyl-chan/plugin-sdk@0.4.0':
+    resolution: {integrity: sha512-JclfEsMVvP+dMfC7kovoBjes71YUpVVDbKU009jDKQa/HtEDScr2XPF9PHUgm8LYU5fEqC/oRacPo3szkGcCRQ==}
     engines: {node: '>=22'}
+    peerDependencies:
+      discord-api-types: '>=0.38.0 <0.39.0'
+      vue: ^3.5.0
+    peerDependenciesMeta:
+      vue:
+        optional: true
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -659,6 +665,9 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  discord-api-types@0.38.48:
+    resolution: {integrity: sha512-WFUE/2o0lBlLeCQonQ+Pu2RqHAqbytBJ2RlXR91gzk05InSS6k9ShzzLYoymrA4c2oRgRKGE7/VqQJNNdGWSxQ==}
 
   end-of-stream@1.4.5:
     resolution: {integrity: sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==}
@@ -1239,9 +1248,12 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@karyl-chan/plugin-sdk@0.2.0':
+  '@karyl-chan/plugin-sdk@0.4.0(discord-api-types@0.38.48)(vue@3.5.34(typescript@5.9.3))':
     dependencies:
+      discord-api-types: 0.38.48
       fastify: 5.8.5
+    optionalDependencies:
+      vue: 3.5.34(typescript@5.9.3)
 
   '@pinojs/redact@0.4.0': {}
 
@@ -1452,6 +1464,8 @@ snapshots:
   dequal@2.0.3: {}
 
   detect-libc@2.1.2: {}
+
+  discord-api-types@0.38.48: {}
 
   end-of-stream@1.4.5:
     dependencies:

@@ -61,6 +61,7 @@ import {
 } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
+import { runtime } from "./runtime.js";
 import {
   isYouTubePlaylistUrl,
   libraryTrackToTrack,
@@ -179,12 +180,9 @@ async function sessionSnapshot(
   let channelId: string | null = null;
   let paused = false;
   if (_botRpc) {
-    const status = (await _botRpc("/api/plugin/voice.status", {
-      guild_id: guildId,
-    }).catch(() => null)) as {
-      channelId?: string | null;
-      paused?: boolean;
-    } | null;
+    const status = (await runtime()
+      .voice.status(guildId)
+      .catch(() => null)) as { channelId?: string | null; paused?: boolean } | null;
     channelId = status?.channelId ?? null;
     paused = status?.paused === true;
   }
@@ -218,7 +216,7 @@ async function sessionSnapshot(
 async function syncAndSnapshot(
   guildId: string,
 ): Promise<Record<string, unknown>> {
-  if (_botRpc) await nowPlaying.sync(guildId, _botRpc).catch(() => null);
+  if (_botRpc) await nowPlaying.sync(guildId).catch(() => null);
   return sessionSnapshot(guildId);
 }
 
@@ -813,7 +811,7 @@ export async function registerWebRoutes(
           if (!peek) break;
           commitCursor(guildId, peek.idx);
         }
-        await doNext(guildId, _botRpc!);
+        await doNext(guildId);
         return syncAndSnapshot(guildId);
       });
       for (const w of batch.waiters) w.resolve(snap);
@@ -842,7 +840,7 @@ export async function registerWebRoutes(
         keepAdvancing(guildId);
         if (!_botRpc)
           return reply.code(503).send({ error: "bot RPC unavailable" });
-        const r = await doPrev(guildId, _botRpc);
+        const r = await doPrev(guildId);
         if (r.kind === "no-history")
           return reply.code(409).send({ error: "Nothing to go back to" });
         return syncAndSnapshot(guildId);
@@ -871,7 +869,7 @@ export async function registerWebRoutes(
       return withGuildLock(guildId, async () => {
         if (!_botRpc)
           return reply.code(503).send({ error: "bot RPC unavailable" });
-        await doPause(guildId, _botRpc, wantPaused);
+        await doPause(guildId, wantPaused);
         return syncAndSnapshot(guildId);
       });
     },
@@ -887,7 +885,7 @@ export async function registerWebRoutes(
       return withGuildLock(guildId, async () => {
         if (!_botRpc)
           return reply.code(503).send({ error: "bot RPC unavailable" });
-        await doStop(guildId, _botRpc);
+        await doStop(guildId);
         return syncAndSnapshot(guildId);
       });
     },
@@ -1117,7 +1115,7 @@ export async function registerWebRoutes(
         keepAdvancing(guildId);
         if (!_botRpc)
           return reply.code(503).send({ error: "bot RPC unavailable" });
-        const r = await doJump(guildId, qid, _botRpc);
+        const r = await doJump(guildId, qid);
         if (r.kind === "no-such-qid")
           return reply.code(404).send({ error: "No such track (refresh and retry)" });
         return syncAndSnapshot(guildId);

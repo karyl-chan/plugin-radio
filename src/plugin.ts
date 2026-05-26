@@ -161,10 +161,9 @@ function linkButtonRow(label: string, url: string): MessageActionRow {
  */
 function syncNowPlaying(
   guildId: string,
-  botRpc: BotRpcFn,
   opts?: { status?: nowPlaying.VoiceStatusLike; skipMessageId?: string },
 ): Promise<{ embeds: APIEmbed[]; components: MessageActionRow[] } | null> {
-  return nowPlaying.sync(guildId, botRpc, opts).catch(() => null);
+  return nowPlaying.sync(guildId, opts).catch(() => null);
 }
 
 /**
@@ -302,11 +301,11 @@ function controlHandler(
       seenGuilds.add(guildId);
 
       if (action === "stop") {
-        await doStop(guildId, ctx.botRpc);
+        await doStop(guildId);
         sessionTokens.delete(guildId);
         const onPublicMessage =
           nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
-        await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+        await nowPlaying.teardown(guildId).catch(() => {});
         // The public message is now deleted — if the click was on it there's
         // nothing left to PATCH; if it was on a /radio np message, leave a notice.
         return onPublicMessage
@@ -321,7 +320,7 @@ function controlHandler(
 
       let paused = status.paused === true;
       if (action === "next") {
-        const r = await doNext(guildId, ctx.botRpc);
+        const r = await doNext(guildId);
         if (r.kind === "queue-empty") {
           // Queue drained — playback stopped. Tear the panel down rather
           // than leave a "nothing playing" card with live buttons. (Check
@@ -329,7 +328,7 @@ function controlHandler(
           // forgets it.)
           const onPublicMessage =
             nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
-          await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+          await nowPlaying.teardown(guildId).catch(() => {});
           return onPublicMessage
             ? undefined
             : {
@@ -344,10 +343,10 @@ function controlHandler(
         }
         paused = false; // a fresh voice.play isn't paused
       } else if (action === "prev") {
-        await doPrev(guildId, ctx.botRpc);
+        await doPrev(guildId);
         paused = false;
       } else if (action === "pause") {
-        ({ paused } = await doPause(guildId, ctx.botRpc));
+        ({ paused } = await doPause(guildId));
       } else if (action === "loop") {
         const cur: LoopMode = getState(guildId)?.loop ?? "off";
         setLoop(guildId, cycleLoopMode(cur));
@@ -355,7 +354,7 @@ function controlHandler(
         setAutoplay(guildId, !(getState(guildId)?.autoplay ?? false));
       }
 
-      const reply = await syncNowPlaying(guildId, ctx.botRpc, {
+      const reply = await syncNowPlaying(guildId, {
         status: { connected: true, channelId: status.channelId, paused },
         skipMessageId: ctx.messageId,
       });
@@ -646,7 +645,7 @@ export default function buildPlugin() {
                       return "⚠ mode must be one of: off / track / queue";
                     }
                     setLoop(guildId, mode);
-                    await syncNowPlaying(guildId, ctx.botRpc);
+                    await syncNowPlaying(guildId);
                     return playbackReply(ctx, guildId, {
                       description: `${loopBadge(mode)} Loop mode set to **${mode}**.`,
                     });
@@ -664,7 +663,7 @@ export default function buildPlugin() {
                     const apCount =
                       getState(guildId)?.autoplayFetchCount ??
                       DEFAULT_AUTOPLAY_FETCH_COUNT;
-                    await syncNowPlaying(guildId, ctx.botRpc);
+                    await syncNowPlaying(guildId);
                     return playbackReply(ctx, guildId, {
                       description:
                         mode === "on"
@@ -688,7 +687,7 @@ export default function buildPlugin() {
                       return "⚠ count must be a whole number.";
                     }
                     const set = setAutoplayFetchCount(guildId, n);
-                    await syncNowPlaying(guildId, ctx.botRpc);
+                    await syncNowPlaying(guildId);
                     const clampedNote =
                       set !== Math.floor(n)
                         ? ` (clamped to the 1–${MAX_AUTOPLAY_FETCH_COUNT} range)`
@@ -699,21 +698,21 @@ export default function buildPlugin() {
                   }
 
                   case "stop": {
-                    await doStop(guildId, ctx.botRpc);
+                    await doStop(guildId);
                     sessionTokens.delete(guildId);
-                    await nowPlaying.teardown(guildId, ctx.botRpc).catch(() => {});
+                    await nowPlaying.teardown(guildId).catch(() => {});
                     return "✓ Stopped, queue cleared, and left voice.";
                   }
 
                   case "skip": {
-                    const r = await doNext(guildId, ctx.botRpc);
+                    const r = await doNext(guildId);
                     if (r.kind === "queue-empty") {
                       await nowPlaying
-                        .teardown(guildId, ctx.botRpc)
+                        .teardown(guildId)
                         .catch(() => {});
                       return "Queue empty — stopped playback.";
                     }
-                    await syncNowPlaying(guildId, ctx.botRpc);
+                    await syncNowPlaying(guildId);
                     if (r.kind === "playing")
                       return playbackReply(ctx, guildId, {
                         description: `⏭ Skipped. Now playing **${r.track.label}**.`,
@@ -733,10 +732,10 @@ export default function buildPlugin() {
                   }
 
                   case "back": {
-                    const r = await doPrev(guildId, ctx.botRpc);
+                    const r = await doPrev(guildId);
                     if (r.kind === "no-history")
                       return "↩ Nothing in the play history to go back to.";
-                    await syncNowPlaying(guildId, ctx.botRpc);
+                    await syncNowPlaying(guildId);
                     return playbackReply(ctx, guildId, {
                       description:
                         r.kind === "playing"
@@ -763,7 +762,7 @@ export default function buildPlugin() {
                         t.queuedByName = ctx.userDisplayName;
                         enqueue(guildId, t);
                       }
-                      await syncNowPlaying(guildId, ctx.botRpc);
+                      await syncNowPlaying(guildId);
                       return playbackReply(ctx, guildId, {
                         description: `➕ Queued **${tracks.length}** track${tracks.length === 1 ? "" : "s"} from the playlist.`,
                       });
@@ -777,7 +776,7 @@ export default function buildPlugin() {
                         t.queuedByName = ctx.userDisplayName;
                         enqueue(guildId, t);
                       }
-                      await syncNowPlaying(guildId, ctx.botRpc);
+                      await syncNowPlaying(guildId);
                       const skipNote = stored.skipped.length
                         ? ` (${stored.skipped.length} entr${stored.skipped.length === 1 ? "y" : "ies"} skipped)`
                         : "";
@@ -789,7 +788,7 @@ export default function buildPlugin() {
                     if (typeof resolved === "string") return resolved;
                     resolved.queuedByName = ctx.userDisplayName;
                     const position = enqueue(guildId, resolved);
-                    await syncNowPlaying(guildId, ctx.botRpc);
+                    await syncNowPlaying(guildId);
                     return playbackReply(ctx, guildId, {
                       description: `➕ Queued **${resolved.label}** (position ${position}).`,
                       ...(resolved.coverUrl
@@ -832,7 +831,7 @@ export default function buildPlugin() {
                       // `play` is a fresh start — drop whatever was queued
                       // before loading this playlist (use `queue` to append).
                       const started = await playBulk(ctx, guildId, tracks);
-                      await syncNowPlaying(guildId, ctx.botRpc);
+                      await syncNowPlaying(guildId);
                       return playbackReply(ctx, guildId, {
                         title: started
                           ? "▶️ Playing playlist"
@@ -861,7 +860,7 @@ export default function buildPlugin() {
                       if (joinErr) return joinErr;
                       for (const t of stored.tracks) t.queuedByName = ctx.userDisplayName;
                       const started = await playBulk(ctx, guildId, stored.tracks);
-                      await syncNowPlaying(guildId, ctx.botRpc);
+                      await syncNowPlaying(guildId);
                       const skipNote = stored.skipped.length
                         ? ` (${stored.skipped.length} skipped)`
                         : "";
@@ -894,7 +893,7 @@ export default function buildPlugin() {
                     // satisfies the compiler about that invariant.
                     const o = await startTrack(ctx, guildId, candidate!.track);
                     if (o.ok) commitCursor(guildId, candidate!.idx);
-                    await syncNowPlaying(guildId, ctx.botRpc);
+                    await syncNowPlaying(guildId);
                     return playbackReply(ctx, guildId, {
                       title: o.ok ? "▶️ Now playing" : "⚠ Playback failed",
                       description:
