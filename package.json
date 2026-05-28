@@ -9,7 +9,8 @@
     "build": "rm -rf dist && vite build && tsc",
     "build:ui": "vite build",
     "build:server": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=20"
@@ -17,7 +18,7 @@
   "dependencies": {
     "@fastify/multipart": "^9.0.3",
     "@iconify/vue": "^5.0.0",
-    "@karyl-chan/plugin-sdk": "^0.6.1",
+    "@karyl-chan/plugin-sdk": "^0.7.0",
     "@karyl-chan/ui": "^0.1.0",
     "@popperjs/core": "^2.11.8",
     "better-sqlite3": "^12.10.0",
@@ -36,6 +37,7 @@
     "typescript": "^5.6.0",
     "vite": "^6.0.7",
     "vite-plugin-singlefile": "^2.0.3",
+    "vitest": "^4.1.7",
     "vue": "^3.5.13"
   },
   "packageManager": "pnpm@10.19.0",

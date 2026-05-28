@@ -3,6 +3,12 @@
  * the now-playing embed and the control-button rows. No bot RPC, no state
  * mutation — derived purely from the queue state (and the bits of voice
  * status / WebUI link the caller passes in).
+ *
+ * Every user-visible string flows through `t(locale, …)` — callers
+ * either resolve the locale from their interaction (`/radio np` →
+ * `resolveLocale(ctx)`) or fall back to `"en"` for surfaces that have
+ * no interaction context (the persistent public now-playing message,
+ * which several users in the channel may read).
  */
 import { componentCustomId, type MessageActionRow } from "@karyl-chan/plugin-sdk";
 import {
@@ -14,26 +20,30 @@ import {
   hasPrevious,
 } from "./queue.js";
 import { STATIONS, findStation } from "./stations.js";
+import { t, type Locale } from "./i18n/index.js";
 
 /** Embed colour shared across the radio plugin's Discord replies. */
 export const EMBED_COLOR = 0x5865f2;
 
-export function formatStationList(): string {
-  const lines = STATIONS.map(
-    (s) => `• \`${s.key}\` — ${s.name} (${s.description})`,
+export function formatStationList(locale: Locale): string {
+  const lines = STATIONS.map((s) =>
+    t(locale, "stationList.entry", {
+      key: s.key,
+      name: s.name,
+      description: s.description,
+    }),
   );
-  return [
-    "**Available stations:**",
-    ...lines,
-    "",
-    "_Or paste any direct http(s) audio URL — mp3 / opus / Icecast streams etc._",
-  ].join("\n");
+  return [t(locale, "stationList.header"), ...lines, "", t(locale, "stationList.footer")].join("\n");
 }
 
 /**
  * Resolve a `source` argument (station key or full URL) into a Track.
  * Returns null if the source is neither a known station nor a parseable
  * http(s) URL — caller should reply with an error.
+ *
+ * No locale needed: the only string this emits is a Track `label`
+ * derived from the source (station name or URL host/path), neither of
+ * which is translated.
  */
 export function resolveTrack(
   source: string,
@@ -63,51 +73,37 @@ export function loopBadge(loop: LoopMode): string {
   return "▶️";
 }
 
-export function formatNowPlaying(
-  guildId: string,
-  channelId: string | null,
-): string {
+export function formatQueueList(guildId: string, locale: Locale): string {
   const s = getState(guildId);
-  if (!s) return "_(nothing playing)_\n_queue empty_";
-  const cur = getCurrent(s);
-  const head = cur
-    ? `🎵 **${cur.label}**${cur.queuedBy ? ` _(queued by <@${cur.queuedBy}>)_` : ""}`
-    : "_(nothing playing)_";
-  const where = channelId ? ` in <#${channelId}>` : "";
-  const queueSize = getUpcoming(s).length;
-  const queueLine =
-    queueSize === 0
-      ? "_queue empty_"
-      : `_queue: ${queueSize} track${queueSize > 1 ? "s" : ""}_`;
-  return `${loopBadge(s.loop)} ${head}${where}\n${queueLine}`;
-}
-
-export function formatQueueList(guildId: string): string {
-  const s = getState(guildId);
-  if (!s) return "**Now:** _(nothing)_\n_(queue empty)_\nLoop: `off`";
+  if (!s) return t(locale, "queuelist.nowEmpty");
   const cur = getCurrent(s);
   const upcoming = getUpcoming(s);
   const lines: string[] = [];
   lines.push(
     cur
-      ? `**Now:** ${cur.label}${cur.queuedBy ? ` (<@${cur.queuedBy}>)` : ""}`
-      : "**Now:** _(nothing)_",
+      ? cur.queuedBy
+        ? t(locale, "queuelist.nowLabelQueuedBy", { label: cur.label, userId: cur.queuedBy })
+        : t(locale, "queuelist.nowLabel", { label: cur.label })
+      : t(locale, "queuelist.nowNothing"),
   );
   if (upcoming.length === 0) {
-    lines.push("_(queue empty)_");
+    lines.push(t(locale, "queuelist.empty"));
   } else {
-    upcoming.slice(0, 15).forEach((t, i) => {
+    upcoming.slice(0, 15).forEach((track, i) => {
       lines.push(
-        `${i + 1}. ${t.label}${t.queuedBy ? ` (<@${t.queuedBy}>)` : ""}`,
+        track.queuedBy
+          ? t(locale, "queuelist.entryQueuedBy", { n: i + 1, label: track.label, userId: track.queuedBy })
+          : t(locale, "queuelist.entry", { n: i + 1, label: track.label }),
       );
     });
     if (upcoming.length > 15) {
-      lines.push(`… and ${upcoming.length - 15} more`);
+      lines.push(t(locale, "queuelist.moreEntries", { n: upcoming.length - 15 }));
     }
   }
-  lines.push(`Loop: \`${s.loop}\``);
-  if (s.autoplay)
-    lines.push(`Autoplay: \`on\` (fetches ${s.autoplayFetchCount} at a time)`);
+  lines.push(t(locale, "queuelist.loopLine", { mode: s.loop }));
+  if (s.autoplay) {
+    lines.push(t(locale, "queuelist.autoplayLine", { count: s.autoplayFetchCount }));
+  }
   return lines.join("\n");
 }
 
@@ -124,10 +120,17 @@ export interface NowPlayingStatus {
   paused?: boolean;
 }
 
-/** Build the "now playing" embed from the guild's queue state + voice status. */
+/**
+ * Build the "now playing" embed from the guild's queue state + voice
+ * status. The public now-playing message has no per-user locale — it
+ * lives in the voice-text channel where multiple users see it — so
+ * callers there pass `"en"`. The ephemeral `/radio np` reply passes the
+ * invoker's resolved locale.
+ */
 export function renderNowPlayingEmbed(
   guildId: string,
   status: NowPlayingStatus,
+  locale: Locale,
 ): Record<string, unknown> {
   const s = getState(guildId);
   const cur = s ? getCurrent(s) : null;
@@ -138,20 +141,28 @@ export function renderNowPlayingEmbed(
   const lines: string[] = [];
   lines.push(
     cur
-      ? `🎵 **${cur.label}**${cur.queuedBy ? ` _(queued by <@${cur.queuedBy}>)_` : ""}`
-      : "_(nothing playing)_",
+      ? cur.queuedBy
+        ? t(locale, "now.currentLineQueuedBy", { label: cur.label, userId: cur.queuedBy })
+        : t(locale, "now.currentLine", { label: cur.label })
+      : t(locale, "now.nothing"),
   );
-  if (status.channelId) lines.push(`in <#${status.channelId}>`);
+  if (status.channelId) lines.push(t(locale, "now.inChannel", { channelId: status.channelId }));
   lines.push(
     queueSize === 0
-      ? "_queue empty_"
-      : `_queue: ${queueSize} track${queueSize > 1 ? "s" : ""}_`,
+      ? t(locale, "now.queueEmpty")
+      : t(
+          locale,
+          queueSize === 1 ? "now.queueSizeSingular" : "now.queueSizePlural",
+          { n: queueSize },
+        ),
   );
-  lines.push(`${loopBadge(loop)} loop \`${loop}\``);
-  if (s?.autoplay) lines.push(`♾️ autoplay on (×${s.autoplayFetchCount})`);
+  lines.push(t(locale, "now.loopBadge", { badge: loopBadge(loop), mode: loop }));
+  if (s?.autoplay) {
+    lines.push(t(locale, "now.autoplayOn", { count: s.autoplayFetchCount }));
+  }
 
   return {
-    title: paused ? "⏸️ Paused" : "🎶 Now playing",
+    title: paused ? t(locale, "now.titlePaused") : t(locale, "now.titlePlaying"),
     color: EMBED_COLOR,
     description: lines.join("\n"),
     ...(cur?.coverUrl ? { thumbnail: { url: cur.coverUrl } } : {}),
@@ -167,12 +178,16 @@ export function renderNowPlayingEmbed(
  * message exists. `prev` is disabled with no play history; the loop and
  * autoplay buttons go blurple (style 1) while active; everything else is
  * the plain secondary style.
+ *
+ * Only the link-button label is locale-sensitive; the icon-only control
+ * buttons (emoji-only) need no translation.
  */
 export function nowPlayingComponents(
   pluginKey: string,
   guildId: string,
   status: { paused?: boolean },
   webuiUrl: string | null,
+  locale: Locale,
 ): MessageActionRow[] {
   const s = getState(guildId);
   const loop: LoopMode = s?.loop ?? "off";
@@ -203,7 +218,7 @@ export function nowPlayingComponents(
   ];
   const row2: unknown[] = [btn("autoplay", "♾️", { style: autoplay ? 1 : 2 })];
   if (webuiUrl) {
-    row2.push({ type: 2, style: 5, label: "🎛 WebUI", url: webuiUrl });
+    row2.push({ type: 2, style: 5, label: t(locale, "btn.webuiShort"), url: webuiUrl });
   }
   rows.push({ type: 1, components: row2 } as unknown as MessageActionRow);
   return rows;

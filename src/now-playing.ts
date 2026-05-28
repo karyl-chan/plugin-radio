@@ -89,17 +89,26 @@ async function getSessionToken(guildId: string): Promise<string | null> {
   return res.token;
 }
 
-/** Render the embed + components + a content hash for change detection. */
+/** Render the embed + components + a content hash for change detection.
+ *
+ * The public now-playing message has no per-user locale — it lives in a
+ * voice-text channel multiple users read. We render it in the canonical
+ * English ("en"); per-user surfaces (the `/radio np` ephemeral reply)
+ * pass their resolved locale through their own call. */
 function render(
   guildId: string,
   status: VoiceStatusLike,
   token: string | null,
 ): { embeds: APIEmbed[]; components: MessageActionRow[]; hash: string } {
   const embeds = [
-    renderNowPlayingEmbed(guildId, {
-      channelId: status.channelId ?? null,
-      paused: !!status.paused,
-    }),
+    renderNowPlayingEmbed(
+      guildId,
+      {
+        channelId: status.channelId ?? null,
+        paused: !!status.paused,
+      },
+      "en",
+    ),
   ];
   const webuiUrl = token ? `${_effectiveBase()}/?token=${token}` : null;
   const components = nowPlayingComponents(
@@ -107,6 +116,7 @@ function render(
     guildId,
     { paused: !!status.paused },
     webuiUrl,
+    "en",
   );
   const hash = createHash("sha1")
     .update(JSON.stringify({ embeds, components }))

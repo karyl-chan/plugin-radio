@@ -4,6 +4,7 @@ import {
   type CommandReply,
   type ComponentContext,
   type ComponentReply,
+  type CommandOption,
   type MessageActionRow,
   definePlugin,
   definePluginCapability,
@@ -63,6 +64,14 @@ import {
   resolvePlaylist,
   resolveStoredPlaylist,
 } from "./resolver.js";
+import {
+  type Locale,
+  type LocaleKey,
+  describeEn,
+  localizedDescriptions,
+  resolveLocale,
+  t,
+} from "./i18n/index.js";
 
 /** Guilds the auto-advance loop ticks over. The SAME Set instance is
  *  threaded into `startAdvanceLoop` (via index.ts) and `registerWebRoutes`
@@ -174,10 +183,13 @@ function syncNowPlaying(
 async function playbackReply(
   ctx: CommandContext,
   guildId: string,
+  locale: Locale,
   embed: Record<string, unknown>,
 ): Promise<CommandReply> {
   const url = await webuiUrlFor(ctx.botRpc, ctx.userId, guildId);
-  const components = url ? [linkButtonRow("🎛 Open WebUI", url)] : undefined;
+  const components = url
+    ? [linkButtonRow(t(locale, "btn.openWebui"), url)]
+    : undefined;
   // Ephemeral: plugin command replies are deferred ephemeral by the bot,
   // and the button embeds a session token — keep it visible only to the
   // ManageGuild member who invoked it.
@@ -250,15 +262,16 @@ function parseSource(ctx: CommandContext): string {
 async function resolveSourceOrError(
   source: string,
   userId: string,
+  locale: Locale,
 ): Promise<Track | string> {
   let track: Track | null;
   try {
     track = await resolveAnyTrack(source, userId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "extraction failed";
-    return `⚠ Couldn't load that source — ${msg.slice(0, 180)}`;
+    return t(locale, "error.resolve.failed", { reason: msg.slice(0, 180) });
   }
-  if (!track) return `⚠ Unknown station / library track / URL: \`${source}\``;
+  if (!track) return t(locale, "error.resolve.unknownSource", { source });
   return track;
 }
 
@@ -277,6 +290,9 @@ function controlHandler(
   return async (ctx): Promise<ComponentReply> => {
     const guildId = ctx.guildId;
     if (!guildId) return; // buttons only live on guild messages
+    // Component contexts carry the clicking user's locale; fall back to
+    // English when the SDK couldn't determine it.
+    const locale = resolveLocale(ctx);
     const nudge = (content: string): Promise<unknown | null> =>
       ctx.discord.interactions
         .followup({
@@ -288,11 +304,11 @@ function controlHandler(
 
     const status = await ctx.voice.status(guildId).catch(() => null);
     if (!status || !status.connected || !status.channelId) {
-      await nudge("⚠ 我已經不在語音頻道了，這個面板已失效。");
+      await nudge(t(locale, "control.notInVoiceAnymore"));
       return;
     }
     if (ctx.voiceChannelId !== status.channelId) {
-      await nudge(`⚠ 你要先加入 <#${status.channelId}> 才能控制播放。`);
+      await nudge(t(locale, "control.mustJoinVoice", { channelId: status.channelId }));
       return;
     }
 
@@ -312,7 +328,10 @@ function controlHandler(
           ? undefined
           : {
               embeds: [
-                { color: EMBED_COLOR, description: "⏹ 已停止播放並離開語音頻道。" },
+                {
+                  color: EMBED_COLOR,
+                  description: t(locale, "control.stopped"),
+                },
               ],
               components: [],
             };
@@ -335,7 +354,7 @@ function controlHandler(
                 embeds: [
                   {
                     color: EMBED_COLOR,
-                    description: "⏹ 佇列播完了，已停止播放。",
+                    description: t(locale, "control.queueExhausted"),
                   },
                 ],
                 components: [],
@@ -360,6 +379,48 @@ function controlHandler(
       });
       return reply ?? undefined;
     });
+  };
+}
+
+// ── Slash-command option helpers ─────────────────────────────────────────
+//
+// Discord supports `name_localizations` + `description_localizations` on
+// every command / option / choice node. The bot's manifest reconciler
+// doesn't yet propagate these to Discord (it strips the option shape to
+// {type, name, description, required, options}), so the maps sit on the
+// option objects ready for when the bot adopts them — see SDK_REVIEW /
+// reconcile.service.ts in the bot for context. Attached today so a future
+// bot upgrade lights translations up without touching plugin code.
+
+/** Build a localised option whose `description` is the English variant
+ *  resolved from `descriptionKey`, with the per-locale map attached. */
+function localizedOption(
+  base: Omit<CommandOption, "description">,
+  descriptionKey: LocaleKey,
+  vars?: Record<string, string | number>,
+): CommandOption {
+  return {
+    ...base,
+    description: describeEn(descriptionKey, vars),
+    // `description_localizations` isn't on the SDK's CommandOption type
+    // yet (the SDK is below the bot's reconciler version that consumes it).
+    // The cast keeps the value on the object so it ships once both sides
+    // catch up; today it's a no-op at the wire.
+    description_localizations: localizedDescriptions(descriptionKey, vars),
+  } as CommandOption & {
+    description_localizations: ReturnType<typeof localizedDescriptions>;
+  };
+}
+
+/** Build a localised choice for an option's `choices[]` array. */
+function localizedChoice(
+  value: string,
+  nameKey: LocaleKey,
+): { name: string; value: string; name_localizations: ReturnType<typeof localizedDescriptions> } {
+  return {
+    name: describeEn(nameKey),
+    value,
+    name_localizations: localizedDescriptions(nameKey),
   };
 }
 
@@ -406,14 +467,13 @@ export default function buildPlugin() {
     guildFeatures: [
       defineGuildFeature({
         key: "radio",
-        name: "Karyl Radio",
-        description:
-          "Internet radio + a YouTube/HTTP audio library: /radio gives voice playback, a queue, the library and a management WebUI. Off by default — enable it per-guild.",
+        name: describeEn("feature.name"),
+        description: describeEn("feature.description"),
         enabledByDefault: false,
         commands: [
           definePluginCommand({
             name: "radio",
-            description: "Internet radio & audio library",
+            description: describeEn("cmd.radio.description"),
             scope: "guild",
             integrationTypes: ["guild_install"],
             contexts: ["Guild"],
@@ -421,131 +481,122 @@ export default function buildPlugin() {
             // are gated separately (manage → plugin:karyl-radio:manage,
             // which also covers uploading private audio files via the WebUI).
             defaultMemberPermissions: "Connect",
+            // Top-level command localizations go on the manifest's plugin
+            // command shape; expressed inline here via a cast so the
+            // value travels with the definition once the bot reconciler
+            // forwards them. See `localizedOption` comment for context.
+            ...({
+              description_localizations: localizedDescriptions(
+                "cmd.radio.description",
+              ),
+            } as { description_localizations: ReturnType<typeof localizedDescriptions> }),
             options: [
               {
-                type: "sub_command",
-                name: "play",
-                description:
-                  "Play a station, library track, or URL (replaces current)",
+                ...localizedOption(
+                  { type: "sub_command", name: "play" },
+                  "cmd.play.description",
+                ),
                 options: [
-                  {
-                    type: "string",
-                    name: "source",
-                    description:
-                      "Playlist name, station key, library track title/ID, or http(s) URL",
-                    required: true,
-                  },
+                  localizedOption(
+                    { type: "string", name: "source", required: true },
+                    "cmd.play.source.description",
+                  ),
                 ],
-              },
+              } as CommandOption,
               {
-                type: "sub_command",
-                name: "queue",
-                description: "Add a track to the queue",
+                ...localizedOption(
+                  { type: "sub_command", name: "queue" },
+                  "cmd.queue.description",
+                ),
                 options: [
-                  {
-                    type: "string",
-                    name: "source",
-                    description:
-                      "Playlist name, station key, library track title/ID, or http(s) URL",
-                    required: true,
-                  },
+                  localizedOption(
+                    { type: "string", name: "source", required: true },
+                    "cmd.queue.source.description",
+                  ),
                 ],
-              },
+              } as CommandOption,
+              localizedOption(
+                { type: "sub_command", name: "skip" },
+                "cmd.skip.description",
+              ),
+              localizedOption(
+                { type: "sub_command", name: "back" },
+                "cmd.back.description",
+              ),
               {
-                type: "sub_command",
-                name: "skip",
-                description: "Skip the current track and play next in queue",
-              },
-              {
-                type: "sub_command",
-                name: "back",
-                description: "Go back to the previously played track",
-              },
-              {
-                type: "sub_command",
-                name: "loop",
-                description: "Set loop mode (off / track / queue)",
+                ...localizedOption(
+                  { type: "sub_command", name: "loop" },
+                  "cmd.loop.description",
+                ),
                 options: [
                   {
-                    type: "string",
-                    name: "mode",
-                    description: "Loop mode",
-                    required: true,
+                    ...localizedOption(
+                      { type: "string", name: "mode", required: true },
+                      "cmd.loop.mode.description",
+                    ),
                     choices: [
-                      { name: "off — no looping", value: "off" },
-                      { name: "track — repeat current", value: "track" },
-                      { name: "queue — cycle the queue", value: "queue" },
+                      localizedChoice("off", "cmd.loop.mode.off"),
+                      localizedChoice("track", "cmd.loop.mode.track"),
+                      localizedChoice("queue", "cmd.loop.mode.queue"),
                     ],
-                  },
+                  } as CommandOption,
                 ],
-              },
+              } as CommandOption,
               {
-                type: "sub_command",
-                name: "autoplay",
-                description:
-                  "Auto-queue YouTube recommendations when the queue runs out",
+                ...localizedOption(
+                  { type: "sub_command", name: "autoplay" },
+                  "cmd.autoplay.description",
+                ),
                 options: [
                   {
-                    type: "string",
-                    name: "mode",
-                    description: "Turn autoplay on or off",
-                    required: true,
+                    ...localizedOption(
+                      { type: "string", name: "mode", required: true },
+                      "cmd.autoplay.mode.description",
+                    ),
                     choices: [
-                      {
-                        name: "on — keep playing related YouTube songs",
-                        value: "on",
-                      },
-                      { name: "off — stop when the queue ends", value: "off" },
+                      localizedChoice("on", "cmd.autoplay.mode.on"),
+                      localizedChoice("off", "cmd.autoplay.mode.off"),
                     ],
-                  },
+                  } as CommandOption,
                 ],
-              },
+              } as CommandOption,
               {
-                type: "sub_command",
-                name: "autoplay-count",
-                description:
-                  "How many YouTube recommendations autoplay queues per refill (1–25)",
+                ...localizedOption(
+                  { type: "sub_command", name: "autoplay-count" },
+                  "cmd.autoplayCount.description",
+                ),
                 options: [
-                  {
-                    type: "integer",
-                    name: "count",
-                    description:
-                      "Recommendations per refill (1–25) — omit to show the current value",
-                    required: false,
-                  },
+                  localizedOption(
+                    { type: "integer", name: "count", required: false },
+                    "cmd.autoplayCount.count.description",
+                  ),
                 ],
-              },
-              {
-                type: "sub_command",
-                name: "stop",
-                description: "Stop playback, clear queue and leave voice",
-              },
-              {
-                type: "sub_command",
-                name: "np",
-                description: "Show what's currently playing (+ WebUI link)",
-              },
-              {
-                type: "sub_command",
-                name: "queuelist",
-                description: "Show the current queue",
-              },
-              {
-                type: "sub_command",
-                name: "stations",
-                description: "List available radio stations",
-              },
-              {
-                type: "sub_command",
-                name: "manage",
-                description:
-                  "Get a private link to the radio admin WebUI (requires permission)",
-              },
+              } as CommandOption,
+              localizedOption(
+                { type: "sub_command", name: "stop" },
+                "cmd.stop.description",
+              ),
+              localizedOption(
+                { type: "sub_command", name: "np" },
+                "cmd.np.description",
+              ),
+              localizedOption(
+                { type: "sub_command", name: "queuelist" },
+                "cmd.queuelist.description",
+              ),
+              localizedOption(
+                { type: "sub_command", name: "stations" },
+                "cmd.stations.description",
+              ),
+              localizedOption(
+                { type: "sub_command", name: "manage" },
+                "cmd.manage.description",
+              ),
             ],
             handler: async (ctx): Promise<CommandReply> => {
               const guildId = ctx.guildId;
-              if (!guildId)
-                return "⚠ This command must be used inside a guild.";
+              const locale = resolveLocale(ctx);
+              if (!guildId) return t(locale, "error.notInGuild");
               seenGuilds.add(guildId);
 
               const userId = ctx.userId;
@@ -559,7 +610,7 @@ export default function buildPlugin() {
               const dispatch = async (): Promise<CommandReply> => {
                 switch (sub) {
                   case "stations":
-                    return formatStationList();
+                    return formatStationList(locale);
 
                   case "manage": {
                     // 15-min bot JWT — only used to bootstrap a plugin-side
@@ -574,26 +625,25 @@ export default function buildPlugin() {
                     // truthy { allowed:false } when the *user* lacks the capability.
                     if (res === null) {
                       return {
-                        content:
-                          "⚠ Couldn't mint a login link — the bot rejected the request " +
-                          `(plugin \`${PLUGIN_KEY}\` may need its \`auth.session\` RPC scope approved, or the bot is unavailable).`,
+                        content: t(locale, "manage.botRejected", {
+                          pluginKey: PLUGIN_KEY,
+                        }),
                         ephemeral: true,
                       };
                     }
                     if (res.allowed !== true || typeof res.token !== "string") {
                       return {
-                        content:
-                          `⚠ You're not allowed to manage Karyl Radio. Need the \`plugin:${PLUGIN_KEY}:manage\` capability ` +
-                          "(bot owners and admins are exempt). Ask an admin to grant it to your role.",
+                        content: t(locale, "manage.notAllowed", {
+                          pluginKey: PLUGIN_KEY,
+                        }),
                         ephemeral: true,
                       };
                     }
                     return {
-                      content:
-                        "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Open within 15 min; your tab session then refreshes itself for up to 1 day.",
+                      content: t(locale, "manage.linkHeader"),
                       components: [
                         linkButtonRow(
-                          "🔧 Open admin WebUI",
+                          t(locale, "manage.openButton"),
                           `${effectiveBase()}/?token=${res.token}`,
                         ),
                       ],
@@ -615,25 +665,30 @@ export default function buildPlugin() {
                     );
                     return {
                       embeds: [
-                        renderNowPlayingEmbed(guildId, {
-                          channelId: status?.channelId ?? null,
-                          paused: !!status?.paused,
-                        }),
+                        renderNowPlayingEmbed(
+                          guildId,
+                          {
+                            channelId: status?.channelId ?? null,
+                            paused: !!status?.paused,
+                          },
+                          locale,
+                        ),
                       ],
                       components: nowPlayingComponents(
                         PLUGIN_KEY,
                         guildId,
                         { paused: !!status?.paused },
                         webuiUrl,
+                        locale,
                       ),
                       ephemeral: true,
                     };
                   }
 
                   case "queuelist":
-                    return playbackReply(ctx, guildId, {
-                      title: "📜 Queue",
-                      description: formatQueueList(guildId),
+                    return playbackReply(ctx, guildId, locale, {
+                      title: t(locale, "queuelist.title"),
+                      description: formatQueueList(guildId, locale),
                     });
 
                   case "loop": {
@@ -642,12 +697,15 @@ export default function buildPlugin() {
                         ? ctx.options.mode
                         : "off";
                     if (mode !== "off" && mode !== "track" && mode !== "queue") {
-                      return "⚠ mode must be one of: off / track / queue";
+                      return t(locale, "error.loop.invalidMode");
                     }
                     setLoop(guildId, mode);
                     await syncNowPlaying(guildId);
-                    return playbackReply(ctx, guildId, {
-                      description: `${loopBadge(mode)} Loop mode set to **${mode}**.`,
+                    return playbackReply(ctx, guildId, locale, {
+                      description: t(locale, "loop.set", {
+                        badge: loopBadge(mode),
+                        mode,
+                      }),
                     });
                   }
 
@@ -657,18 +715,24 @@ export default function buildPlugin() {
                         ? ctx.options.mode
                         : "";
                     if (mode !== "on" && mode !== "off") {
-                      return "⚠ mode must be `on` or `off`.";
+                      return t(locale, "error.autoplay.invalidMode");
                     }
                     setAutoplay(guildId, mode === "on");
                     const apCount =
                       getState(guildId)?.autoplayFetchCount ??
                       DEFAULT_AUTOPLAY_FETCH_COUNT;
                     await syncNowPlaying(guildId);
-                    return playbackReply(ctx, guildId, {
+                    return playbackReply(ctx, guildId, locale, {
                       description:
                         mode === "on"
-                          ? `♾️ Autoplay **on** — when the queue runs out I'll queue **${apCount}** YouTube recommendation${apCount === 1 ? "" : "s"} (change with \`/radio autoplay-count\`) seeded from the last YouTube track.`
-                          : "Autoplay **off** — playback stops when the queue ends.",
+                          ? t(
+                              locale,
+                              apCount === 1
+                                ? "autoplay.onSingular"
+                                : "autoplay.onPlural",
+                              { count: apCount },
+                            )
+                          : t(locale, "autoplay.off"),
                     });
                   }
 
@@ -678,22 +742,36 @@ export default function buildPlugin() {
                       DEFAULT_AUTOPLAY_FETCH_COUNT;
                     const raw = ctx.options.count;
                     if (raw === undefined || raw === null) {
-                      return playbackReply(ctx, guildId, {
-                        description: `♾️ Autoplay queues **${cur}** recommendation${cur === 1 ? "" : "s"} per refill. Pass \`count:\` (1–${MAX_AUTOPLAY_FETCH_COUNT}) to change it.`,
+                      return playbackReply(ctx, guildId, locale, {
+                        description: t(
+                          locale,
+                          cur === 1
+                            ? "autoplayCount.showSingular"
+                            : "autoplayCount.showPlural",
+                          { count: cur, max: MAX_AUTOPLAY_FETCH_COUNT },
+                        ),
                       });
                     }
                     const n = Number(raw);
                     if (!Number.isFinite(n)) {
-                      return "⚠ count must be a whole number.";
+                      return t(locale, "error.autoplayCount.notNumber");
                     }
                     const set = setAutoplayFetchCount(guildId, n);
                     await syncNowPlaying(guildId);
-                    const clampedNote =
+                    const clampNote =
                       set !== Math.floor(n)
-                        ? ` (clamped to the 1–${MAX_AUTOPLAY_FETCH_COUNT} range)`
+                        ? t(locale, "autoplayCount.clampNote", {
+                            max: MAX_AUTOPLAY_FETCH_COUNT,
+                          })
                         : "";
-                    return playbackReply(ctx, guildId, {
-                      description: `♾️ Autoplay will now queue **${set}** recommendation${set === 1 ? "" : "s"} per refill${clampedNote}. Takes effect at the next refill; tracks already queued stay.`,
+                    return playbackReply(ctx, guildId, locale, {
+                      description: t(
+                        locale,
+                        set === 1
+                          ? "autoplayCount.setSingular"
+                          : "autoplayCount.setPlural",
+                        { count: set, clampNote },
+                      ),
                     });
                   }
 
@@ -701,7 +779,7 @@ export default function buildPlugin() {
                     await doStop(guildId);
                     sessionTokens.delete(guildId);
                     await nowPlaying.teardown(guildId).catch(() => {});
-                    return "✓ Stopped, queue cleared, and left voice.";
+                    return t(locale, "stop.done");
                   }
 
                   case "skip": {
@@ -710,37 +788,40 @@ export default function buildPlugin() {
                       await nowPlaying
                         .teardown(guildId)
                         .catch(() => {});
-                      return "Queue empty — stopped playback.";
+                      return t(locale, "skip.queueEmpty");
                     }
                     await syncNowPlaying(guildId);
                     if (r.kind === "playing")
-                      return playbackReply(ctx, guildId, {
-                        description: `⏭ Skipped. Now playing **${r.track.label}**.`,
+                      return playbackReply(ctx, guildId, locale, {
+                        description: t(locale, "skip.nowPlaying", {
+                          label: r.track.label,
+                        }),
                         ...(r.track.coverUrl
                           ? { thumbnail: { url: r.track.coverUrl } }
                           : {}),
                       });
                     if (r.kind === "play-failed")
-                      return playbackReply(ctx, guildId, {
-                        description: `⚠ Couldn't start **${r.track.label}** — re-queued, try again.`,
+                      return playbackReply(ctx, guildId, locale, {
+                        description: t(locale, "skip.startFailed", {
+                          label: r.track.label,
+                        }),
                       });
                     // r.kind === "exhausted"
-                    return playbackReply(ctx, guildId, {
-                      description:
-                        "⚠ Skipped several unplayable tracks — try again.",
+                    return playbackReply(ctx, guildId, locale, {
+                      description: t(locale, "skip.exhausted"),
                     });
                   }
 
                   case "back": {
                     const r = await doPrev(guildId);
                     if (r.kind === "no-history")
-                      return "↩ Nothing in the play history to go back to.";
+                      return t(locale, "back.noHistory");
                     await syncNowPlaying(guildId);
-                    return playbackReply(ctx, guildId, {
+                    return playbackReply(ctx, guildId, locale, {
                       description:
                         r.kind === "playing"
-                          ? `⏮ Back to **${r.track.label}**.`
-                          : `⚠ Failed to start **${r.track.label}**.`,
+                          ? t(locale, "back.nowPlaying", { label: r.track.label })
+                          : t(locale, "back.startFailed", { label: r.track.label }),
                       ...(r.kind === "playing" && r.track.coverUrl
                         ? { thumbnail: { url: r.track.coverUrl } }
                         : {}),
@@ -754,43 +835,84 @@ export default function buildPlugin() {
                       try {
                         tracks = await resolvePlaylist(source, userId);
                       } catch (err) {
-                        return `⚠ Couldn't expand that playlist — ${(err instanceof Error ? err.message : "error").slice(0, 180)}`;
+                        return t(locale, "error.playlist.expandFailed", {
+                          reason: (err instanceof Error ? err.message : "error").slice(0, 180),
+                        });
                       }
                       if (tracks.length === 0)
-                        return "⚠ That playlist is empty or unavailable.";
-                      for (const t of tracks) {
-                        t.queuedByName = ctx.userDisplayName;
-                        enqueue(guildId, t);
+                        return t(locale, "error.playlist.empty");
+                      for (const tr of tracks) {
+                        tr.queuedByName = ctx.userDisplayName;
+                        enqueue(guildId, tr);
                       }
                       await syncNowPlaying(guildId);
-                      return playbackReply(ctx, guildId, {
-                        description: `➕ Queued **${tracks.length}** track${tracks.length === 1 ? "" : "s"} from the playlist.`,
+                      return playbackReply(ctx, guildId, locale, {
+                        description: t(
+                          locale,
+                          tracks.length === 1
+                            ? "queue.youtubePlaylistAddedSingular"
+                            : "queue.youtubePlaylistAddedPlural",
+                          { count: tracks.length },
+                        ),
                       });
                     }
                     const stored = await resolveStoredPlaylist(source, userId);
                     if (stored) {
                       if (stored.tracks.length === 0) {
-                        return `⚠ Playlist **${stored.playlist.name}** has no playable entries${stored.skipped.length ? ` (${stored.skipped.length} couldn't be resolved)` : ""}.`;
+                        const skipped =
+                          stored.skipped.length > 0
+                            ? t(locale, "error.storedPlaylist.skippedCount", {
+                                n: stored.skipped.length,
+                              })
+                            : "";
+                        return t(locale, "error.storedPlaylist.empty", {
+                          name: stored.playlist.name,
+                          skipped,
+                        });
                       }
-                      for (const t of stored.tracks) {
-                        t.queuedByName = ctx.userDisplayName;
-                        enqueue(guildId, t);
+                      for (const tr of stored.tracks) {
+                        tr.queuedByName = ctx.userDisplayName;
+                        enqueue(guildId, tr);
                       }
                       await syncNowPlaying(guildId);
-                      const skipNote = stored.skipped.length
-                        ? ` (${stored.skipped.length} entr${stored.skipped.length === 1 ? "y" : "ies"} skipped)`
-                        : "";
-                      return playbackReply(ctx, guildId, {
-                        description: `➕ Queued **${stored.tracks.length}** track${stored.tracks.length === 1 ? "" : "s"} from playlist **${stored.playlist.name}**${skipNote}.`,
+                      const skipNote =
+                        stored.skipped.length > 0
+                          ? t(
+                              locale,
+                              stored.skipped.length === 1
+                                ? "queue.skippedSuffixSingular"
+                                : "queue.skippedSuffixPlural",
+                              { n: stored.skipped.length },
+                            )
+                          : "";
+                      return playbackReply(ctx, guildId, locale, {
+                        description: t(
+                          locale,
+                          stored.tracks.length === 1
+                            ? "queue.storedPlaylistAddedSingular"
+                            : "queue.storedPlaylistAddedPlural",
+                          {
+                            count: stored.tracks.length,
+                            name: stored.playlist.name,
+                            skipNote,
+                          },
+                        ),
                       });
                     }
-                    const resolved = await resolveSourceOrError(source, userId);
+                    const resolved = await resolveSourceOrError(
+                      source,
+                      userId,
+                      locale,
+                    );
                     if (typeof resolved === "string") return resolved;
                     resolved.queuedByName = ctx.userDisplayName;
                     const position = enqueue(guildId, resolved);
                     await syncNowPlaying(guildId);
-                    return playbackReply(ctx, guildId, {
-                      description: `➕ Queued **${resolved.label}** (position ${position}).`,
+                    return playbackReply(ctx, guildId, locale, {
+                      description: t(locale, "queue.addedAtPositionSingular", {
+                        label: resolved.label,
+                        position,
+                      }),
                       ...(resolved.coverUrl
                         ? { thumbnail: { url: resolved.coverUrl } }
                         : {}),
@@ -804,15 +926,13 @@ export default function buildPlugin() {
                     // on; any other source turns it off (a fresh play resets it).
                     const autoOn = isYouTubeUrlWithList(source);
                     setAutoplay(guildId, autoOn);
-                    const autoNote = autoOn
-                      ? "\n♾️ Autoplay on — I'll keep going with YouTube recommendations when the queue runs out."
-                      : "";
+                    const autoNote = autoOn ? t(locale, "autoplay.notice.on") : "";
                     const joinFirst = async (): Promise<string | null> => {
                       try {
                         await ctx.voice.join({ guildId, userId });
                         return null;
                       } catch {
-                        return "⚠ Could not join voice — make sure you're in a voice channel and the bot has permission.";
+                        return t(locale, "error.voice.joinFailed");
                       }
                     };
 
@@ -821,26 +941,40 @@ export default function buildPlugin() {
                       try {
                         tracks = await resolvePlaylist(source, userId);
                       } catch (err) {
-                        return `⚠ Couldn't expand that playlist — ${(err instanceof Error ? err.message : "error").slice(0, 180)}`;
+                        return t(locale, "error.playlist.expandFailed", {
+                          reason: (err instanceof Error ? err.message : "error").slice(0, 180),
+                        });
                       }
                       if (tracks.length === 0)
-                        return "⚠ That playlist is empty or unavailable.";
+                        return t(locale, "error.playlist.empty");
                       const joinErr = await joinFirst();
                       if (joinErr) return joinErr;
-                      for (const t of tracks) t.queuedByName = ctx.userDisplayName;
+                      for (const tr of tracks) tr.queuedByName = ctx.userDisplayName;
                       // `play` is a fresh start — drop whatever was queued
                       // before loading this playlist (use `queue` to append).
                       const started = await playBulk(ctx, guildId, tracks);
                       await syncNowPlaying(guildId);
-                      return playbackReply(ctx, guildId, {
+                      const single = tracks.length === 1;
+                      const description = started
+                        ? t(
+                            locale,
+                            single
+                              ? "play.playlist.startedSingular"
+                              : "play.playlist.startedPlural",
+                            { label: started.label, count: tracks.length },
+                          )
+                        : t(
+                            locale,
+                            single
+                              ? "play.playlist.couldNotStartSingular"
+                              : "play.playlist.couldNotStartPlural",
+                            { count: tracks.length },
+                          );
+                      return playbackReply(ctx, guildId, locale, {
                         title: started
-                          ? "▶️ Playing playlist"
-                          : "▶️ Playlist queued",
-                        description:
-                          (started
-                            ? `**${started.label}** — ${tracks.length} track${tracks.length === 1 ? "" : "s"} queued.`
-                            : `Queued ${tracks.length} track${tracks.length === 1 ? "" : "s"}, but couldn't start the first one.`) +
-                          autoNote,
+                          ? t(locale, "play.playlist.titlePlaying")
+                          : t(locale, "play.playlist.titleQueued"),
+                        description: description + autoNote,
                         ...(started?.coverUrl
                           ? { thumbnail: { url: started.coverUrl } }
                           : {}),
@@ -854,32 +988,69 @@ export default function buildPlugin() {
                     const stored = await resolveStoredPlaylist(source, userId);
                     if (stored) {
                       if (stored.tracks.length === 0) {
-                        return `⚠ Playlist **${stored.playlist.name}** has no playable entries${stored.skipped.length ? ` (${stored.skipped.length} couldn't be resolved)` : ""}.`;
+                        const skipped =
+                          stored.skipped.length > 0
+                            ? t(locale, "error.storedPlaylist.skippedCount", {
+                                n: stored.skipped.length,
+                              })
+                            : "";
+                        return t(locale, "error.storedPlaylist.empty", {
+                          name: stored.playlist.name,
+                          skipped,
+                        });
                       }
                       const joinErr = await joinFirst();
                       if (joinErr) return joinErr;
-                      for (const t of stored.tracks) t.queuedByName = ctx.userDisplayName;
+                      for (const tr of stored.tracks)
+                        tr.queuedByName = ctx.userDisplayName;
                       const started = await playBulk(ctx, guildId, stored.tracks);
                       await syncNowPlaying(guildId);
-                      const skipNote = stored.skipped.length
-                        ? ` (${stored.skipped.length} skipped)`
-                        : "";
-                      return playbackReply(ctx, guildId, {
+                      const skipNote =
+                        stored.skipped.length > 0
+                          ? t(locale, "play.storedPlaylist.skipNote", {
+                              n: stored.skipped.length,
+                            })
+                          : "";
+                      const single = stored.tracks.length === 1;
+                      const description = started
+                        ? t(
+                            locale,
+                            single
+                              ? "play.storedPlaylist.startedSingular"
+                              : "play.storedPlaylist.startedPlural",
+                            {
+                              label: started.label,
+                              count: stored.tracks.length,
+                              skipNote,
+                            },
+                          )
+                        : t(
+                            locale,
+                            single
+                              ? "play.storedPlaylist.couldNotStartSingular"
+                              : "play.storedPlaylist.couldNotStartPlural",
+                            { count: stored.tracks.length, skipNote },
+                          );
+                      return playbackReply(ctx, guildId, locale, {
                         title: started
-                          ? `▶️ Playing playlist: ${stored.playlist.name}`
-                          : `▶️ Playlist queued: ${stored.playlist.name}`,
-                        description:
-                          (started
-                            ? `**${started.label}** — ${stored.tracks.length} track${stored.tracks.length === 1 ? "" : "s"} queued${skipNote}.`
-                            : `Queued ${stored.tracks.length} track${stored.tracks.length === 1 ? "" : "s"}${skipNote}, but couldn't start the first one.`) +
-                          autoNote,
+                          ? t(locale, "play.storedPlaylist.titlePlaying", {
+                              name: stored.playlist.name,
+                            })
+                          : t(locale, "play.storedPlaylist.titleQueued", {
+                              name: stored.playlist.name,
+                            }),
+                        description: description + autoNote,
                         ...(started?.coverUrl
                           ? { thumbnail: { url: started.coverUrl } }
                           : {}),
                       });
                     }
 
-                    const resolved = await resolveSourceOrError(source, userId);
+                    const resolved = await resolveSourceOrError(
+                      source,
+                      userId,
+                      locale,
+                    );
                     if (typeof resolved === "string") return resolved;
                     resolved.queuedByName = ctx.userDisplayName;
                     const joinErr = await joinFirst();
@@ -894,12 +1065,14 @@ export default function buildPlugin() {
                     const o = await startTrack(ctx, guildId, candidate!.track);
                     if (o.ok) commitCursor(guildId, candidate!.idx);
                     await syncNowPlaying(guildId);
-                    return playbackReply(ctx, guildId, {
-                      title: o.ok ? "▶️ Now playing" : "⚠ Playback failed",
+                    return playbackReply(ctx, guildId, locale, {
+                      title: o.ok
+                        ? t(locale, "play.single.titleNowPlaying")
+                        : t(locale, "play.single.titleFailed"),
                       description:
                         (o.ok
-                          ? `**${o.track.label}**`
-                          : `Joined voice but failed to start **${resolved.label}**.`) +
+                          ? t(locale, "play.single.started", { label: o.track.label })
+                          : t(locale, "play.single.failed", { label: resolved.label })) +
                         autoNote,
                       ...(o.ok && o.track.coverUrl
                         ? { thumbnail: { url: o.track.coverUrl } }
@@ -908,7 +1081,9 @@ export default function buildPlugin() {
                   }
 
                   default:
-                    return `⚠ Unknown subcommand \`${sub ?? "(none)"}\``;
+                    return t(locale, "error.unknownSubcommand", {
+                      sub: sub ?? "(none)",
+                    });
                 }
               };
               return sub && !LOCK_FREE_SUBS.has(sub)
