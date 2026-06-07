@@ -16,7 +16,7 @@ import { getMusicDir, ensureMusicDirSync } from "./downloader.js";
  */
 
 const DB_FILE = "radio.db";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 let db: DB | null = null;
 
@@ -72,6 +72,23 @@ function migrate(conn: DB): void {
       value       TEXT NOT NULL,
       PRIMARY KEY (playlist_id, position)
     );
+
+    -- v2: API keys for the external control channel (/api/ext/*). Each key
+    -- is bound to a single Discord user (the security anchor — a key only
+    -- ever lets the bot join *that* user's voice channel); the guild is
+    -- resolved per-request (explicit guildId or voice.locate), never stored
+    -- here. Only the sha256 of the plaintext is persisted.
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id           TEXT PRIMARY KEY,
+      key_hash     TEXT NOT NULL UNIQUE,
+      user_id      TEXT NOT NULL,
+      scopes       TEXT NOT NULL DEFAULT 'control',
+      label        TEXT,
+      created_at   INTEGER NOT NULL,
+      last_used_at INTEGER,
+      revoked      INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS api_keys_user_idx ON api_keys(user_id);
   `);
   conn.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
