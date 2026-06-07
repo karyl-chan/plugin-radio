@@ -80,6 +80,21 @@ export type PlaylistEntryInfo =
   | { kind: "url"; label: string }
   | { kind: "unknown"; label: string };
 
+/**
+ * Mirror of the server's ApiKeyRecord (src/api-keys.ts) — a credential
+ * for the external control channel (/api/ext/*). The plaintext is never
+ * in this shape; it's returned once, separately, at creation time.
+ */
+export interface ApiKey {
+  id: string;
+  userId: string;
+  scopes: ("read" | "control")[];
+  label: string | null;
+  createdAt: number;
+  lastUsedAt: number | null;
+  revoked: boolean;
+}
+
 export interface SessionSnapshot {
   guildId: string;
   channelId: string | null;

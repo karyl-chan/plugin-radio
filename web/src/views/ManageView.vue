@@ -8,18 +8,21 @@ import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import { api, apiUpload } from "../api";
 import { useToast } from "../composables/use-toast";
 import { fmtDur, fmtSize } from "../composables/use-format";
-import type { LibraryTrack, Playlist } from "../types";
+import type { ApiKey, LibraryTrack, Playlist } from "../types";
 
 const { ok, error } = useToast();
 
-type Tab = "tracks" | "playlists";
+type Tab = "tracks" | "playlists" | "keys";
 const activeTab = ref<Tab>("tracks");
 const tabs: TabDef[] = [
   { key: "tracks", label: "Tracks" },
   { key: "playlists", label: "Playlists" },
+  { key: "keys", label: "API Keys" },
 ];
 function pickTab(key: string): void {
-  if (key === "tracks" || key === "playlists") activeTab.value = key;
+  if (key === "tracks" || key === "playlists" || key === "keys") {
+    activeTab.value = key;
+  }
 }
 
 const tracks = ref<LibraryTrack[]>([]);
@@ -51,6 +54,14 @@ const playlistEditingTarget = computed<Playlist | null>(() =>
     ? null
     : playlistEditing.value,
 );
+
+// API keys tab. `freshKey` holds the one-time plaintext returned by a
+// create call — shown in a reveal banner until the manager dismisses it,
+// since it's unrecoverable afterwards.
+const apiKeys = ref<ApiKey[]>([]);
+const newKeyLabel = ref("");
+const creatingKey = ref(false);
+const freshKey = ref<string | null>(null);
 
 async function load() {
   try {
@@ -183,9 +194,66 @@ function subText(t: LibraryTrack): string {
     .join(" · ");
 }
 
+// ── API keys ────────────────────────────────────────────────────────
+async function loadKeys(): Promise<void> {
+  try {
+    const r = await api<{ keys: ApiKey[] }>("GET", "/api/keys");
+    apiKeys.value = r.keys || [];
+  } catch (e: any) {
+    error(e.message);
+  }
+}
+
+async function createKey(): Promise<void> {
+  creatingKey.value = true;
+  try {
+    const r = await api<{ key: ApiKey; plaintext: string }>("POST", "/api/keys", {
+      label: newKeyLabel.value.trim() || undefined,
+    });
+    freshKey.value = r.plaintext;
+    newKeyLabel.value = "";
+    ok("API key created — copy it now");
+    await loadKeys();
+  } catch (e: any) {
+    error(e.message);
+  } finally {
+    creatingKey.value = false;
+  }
+}
+
+async function revokeKey(k: ApiKey): Promise<void> {
+  if (!confirm(`Revoke API key "${k.label || k.id}"? Integrations using it stop working.`))
+    return;
+  try {
+    await api("DELETE", "/api/keys/" + encodeURIComponent(k.id));
+    ok("Revoked");
+    await loadKeys();
+  } catch (e: any) {
+    error(e.message);
+  }
+}
+
+async function copyFreshKey(): Promise<void> {
+  if (!freshKey.value) return;
+  try {
+    await navigator.clipboard.writeText(freshKey.value);
+    ok("Copied to clipboard");
+  } catch {
+    error("Couldn't copy — select and copy manually");
+  }
+}
+
+function keySubText(k: ApiKey): string {
+  const used = k.lastUsedAt
+    ? `last used ${new Date(k.lastUsedAt).toLocaleString()}`
+    : "never used";
+  return `${k.scopes.join(", ")} · ${used}`;
+}
+
 onMounted(() => {
   load();
   loadPlaylists();
+  loadKeys();
 });
 </script>
 
@@ -274,7 +342,7 @@ onMounted(() => {
     </section>
   </template>
 
-  <template v-else>
+  <template v-else-if="activeTab === 'playlists'">
     <div class="card">
       <div class="row">
         <span class="grow muted intro">
@@ -305,6 +373,59 @@ onMounted(() => {
             </AppButton>
             <AppButton variant="danger" size="sm" @click="removePlaylist(p)">
               🗑
+            </AppButton>
+          </div>
+        </li>
+      </ul>
+    </section>
+  </template>
+
+  <template v-else>
+    <div class="card">
+      <div class="row">
+        <span class="grow muted intro">
+          Keys let an external app (e.g. the browser extension) make the bot
+          join <strong>your</strong> voice channel and control playback.
+          Treat a key like a password.
+        </span>
+      </div>
+      <form class="row" @submit.prevent="createKey">
+        <input
+          v-model="newKeyLabel"
+          class="grow"
+          placeholder="Label (e.g. “Chrome extension”)"
+        />
+        <AppButton type="submit" :loading="creatingKey">+ New key</AppButton>
+      </form>
+      <div v-if="freshKey" class="fresh-key">
+        <div class="fresh-key__label">
+          Copy this now — it won't be shown again:
+        </div>
+        <div class="fresh-key__row">
+          <code class="fresh-key__value">{{ freshKey }}</code>
+          <AppButton variant="ghost" size="sm" @click="copyFreshKey">
+            ⧉ Copy
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="freshKey = null">
+            Dismiss
+          </AppButton>
+        </div>
+      </div>
+    </div>
+
+    <section class="section">
+      <div class="section-title">API keys</div>
+      <ul class="list">
+        <li v-if="apiKeys.length === 0" class="empty">No API keys.</li>
+        <li v-for="k in apiKeys" :key="k.id" class="item">
+          <div class="thumb thumb--sm thumb--placeholder">🔑</div>
+          <div class="info">
+            <div class="name">{{ k.label || "Unlabelled key" }}</div>
+            <div class="dim">{{ keySubText(k) }}</div>
+          </div>
+          <div class="actions">
+            <AppButton variant="danger" size="sm" @click="revokeKey(k)">
+              Revoke
             </AppButton>
           </div>
         </li>
@@ -345,6 +466,31 @@ onMounted(() => {
   padding: 0.05rem 0.3rem;
   border-radius: 4px;
   font-size: 0.82rem;
+}
+
+.fresh-key {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--accent, #5865f2);
+  border-radius: 6px;
+  background: var(--bg-surface-2);
+}
+.fresh-key__label {
+  font-size: 0.8rem;
+  margin-bottom: 0.4rem;
+  color: var(--text-dim, #aaa);
+}
+.fresh-key__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.fresh-key__value {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  word-break: break-all;
+  user-select: all;
 }
 
 .upload-row {

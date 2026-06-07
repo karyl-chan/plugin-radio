@@ -14,6 +14,12 @@ import {
   verifyManageToken,
   type ManageClaims,
 } from "./manage-tokens.js";
+import {
+  issueKey,
+  listKeys,
+  normalizeScopes,
+  revokeKey,
+} from "./api-keys.js";
 import { getMusicDir, isHttpUrl } from "./downloader.js";
 import {
   findBySourceUrl,
@@ -737,6 +743,54 @@ export async function registerWebRoutes(
       return reply.code(400).send({ error: msg });
     }
   });
+
+  // ── Manage WebUI: external-control API keys ─────────────────────────────
+  //
+  // CRUD for the `rk_…` keys that authenticate the /api/ext/* control
+  // channel (browser extension, etc.). Same manage gate as /api/tracks*;
+  // keys are bound to the manager's own userId (the manage token's
+  // identity), so a manager only ever sees / mints / revokes their own.
+
+  server.get("/api/keys", async (request, reply) => {
+    const claims = authManageAccess(request, reply);
+    if (!claims) return;
+    return { keys: listKeys(claims.userId) };
+  });
+
+  server.post("/api/keys", async (request, reply) => {
+    const claims = authManageAccess(request, reply);
+    if (!claims) return;
+    let body: { label?: unknown; scopes?: unknown };
+    try {
+      body =
+        typeof request.body === "string"
+          ? JSON.parse(request.body)
+          : (request.body as { label?: unknown; scopes?: unknown });
+    } catch {
+      return reply.code(400).send({ error: "Invalid JSON" });
+    }
+    const label =
+      typeof body?.label === "string" ? body.label.slice(0, 100) : null;
+    const { record, plaintext } = issueKey({
+      userId: claims.userId,
+      label,
+      scopes: normalizeScopes(body?.scopes),
+    });
+    // The plaintext crosses the wire exactly once, here — the client must
+    // surface it to the user immediately (it's only stored hashed).
+    return { key: record, plaintext };
+  });
+
+  server.delete<{ Params: { id: string } }>(
+    "/api/keys/:id",
+    async (request, reply) => {
+      const claims = authManageAccess(request, reply);
+      if (!claims) return;
+      const ok = revokeKey(request.params.id, claims.userId);
+      if (!ok) return reply.code(404).send({ error: "Not found" });
+      return { ok: true };
+    },
+  );
 
   // ── Session WebUI: playback control ─────────────────────────────────────
   server.get<{ Params: { guildId: string } }>(
