@@ -57,6 +57,7 @@ import {
   setRadioPublicBaseUrl,
   setRadioSessionVerifyKey,
 } from "./web-routes.js";
+import { registerExtRoutes } from "./ext-routes.js";
 import {
   type PlayOutcome,
   playTrack,
@@ -438,6 +439,7 @@ export default function buildPlugin() {
       "voice.pause",
       "voice.stop",
       "voice.status",
+      "voice.locate",
       "messages.send",
       "messages.edit",
       "messages.delete",
@@ -1096,6 +1098,10 @@ export default function buildPlugin() {
     ],
     onReady: async (server) => {
       await registerWebRoutes(server, PLUGIN_KEY, effectiveBase, seenGuilds);
+      // External control channel (API-key auth). Shares the advance-loop
+      // guild set so a play/queue started via the extension keeps
+      // advancing like a slash-command session.
+      registerExtRoutes(server, seenGuilds);
     },
   });
 }
