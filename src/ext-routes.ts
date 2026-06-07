@@ -234,49 +234,89 @@ export function registerExtRoutes(
     },
   );
 
+  // ── Shared play/queue plumbing ──────────────────────────────────────
+  /** voice.join args: the locate-pinned channel if we have it, else let
+   *  the bot resolve the key user's current VC in this guild. */
+  function joinArgs(target: Target, userId: string) {
+    return target.channelId
+      ? { guildId: target.guildId, channelId: target.channelId }
+      : { guildId: target.guildId, userId };
+  }
+
+  /** Join voice; reply 409 + return false on failure. */
+  async function joinOr409(
+    target: Target,
+    userId: string,
+    reply: FastifyReply,
+  ): Promise<boolean> {
+    try {
+      await runtime().voice.join(joinArgs(target, userId));
+      return true;
+    } catch {
+      reply.code(409).send({ error: "Couldn't join your voice channel" });
+      return false;
+    }
+  }
+
+  /** Resolve a source; reply 400 + return null on failure. */
+  async function resolveSourceOr400(
+    source: string,
+    userId: string,
+    reply: FastifyReply,
+  ): Promise<Track[] | null> {
+    try {
+      return await resolveSource(source, userId);
+    } catch (err) {
+      reply.code(400).send({
+        error:
+          err instanceof Error ? err.message.slice(0, 200) : "Couldn't resolve source",
+      });
+      return null;
+    }
+  }
+
+  /** Shared preamble for play/queue: auth (control), a non-empty source,
+   *  and a resolved guild target. Replies + returns null on any failure. */
+  async function requirePlayable(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<{ key: AuthedKey; source: string; target: Target } | null> {
+    const key = authKey(request, reply, "control");
+    if (!key) return null;
+    const body = parseBody(request);
+    const source = typeof body.source === "string" ? body.source.trim() : "";
+    if (!source) {
+      reply.code(400).send({ error: "source required" });
+      return null;
+    }
+    const target = await resolveTarget(key.userId, body, reply);
+    if (!target) return null;
+    return { key, source, target };
+  }
+
   // ── POST /api/ext/play ──────────────────────────────────────────────
   // Join the caller's current VC (or the channel voice.locate pinned),
   // then start a fresh session from `source`. The flagship endpoint: a
   // browser extension on any YouTube page POSTs { source: <page url> }.
   server.post("/api/ext/play", async (request, reply) => {
-    const key = authKey(request, reply, "control");
-    if (!key) return;
-    const body = parseBody(request);
-    const source = typeof body.source === "string" ? body.source.trim() : "";
-    if (!source) return reply.code(400).send({ error: "source required" });
-    const target = await resolveTarget(key.userId, body, reply);
-    if (!target) return;
+    const ctx = await requirePlayable(request, reply);
+    if (!ctx) return;
+    if (!(await joinOr409(ctx.target, ctx.key.userId, reply))) return;
+    const tracks = await resolveSourceOr400(ctx.source, ctx.key.userId, reply);
+    if (!tracks) return;
 
-    try {
-      await runtime().voice.join(
-        target.channelId
-          ? { guildId: target.guildId, channelId: target.channelId }
-          : { guildId: target.guildId, userId: key.userId },
-      );
-    } catch {
-      return reply.code(409).send({ error: "Couldn't join your voice channel" });
-    }
-
-    let tracks: Track[];
-    try {
-      tracks = await resolveSource(source, key.userId);
-    } catch (err) {
-      return reply.code(400).send({
-        error: err instanceof Error ? err.message.slice(0, 200) : "Couldn't resolve source",
-      });
-    }
-
-    const epochAtStart = getEpoch(target.guildId);
-    return withGuildLock(target.guildId, async () => {
-      if (getEpoch(target.guildId) !== epochAtStart) {
+    const { guildId } = ctx.target;
+    const epochAtStart = getEpoch(guildId);
+    return withGuildLock(guildId, async () => {
+      if (getEpoch(guildId) !== epochAtStart) {
         return reply.code(409).send({ error: "Session changed — retry." });
       }
-      keepAdvancing(target.guildId);
-      clearQueue(target.guildId);
-      for (const t of tracks) enqueue(target.guildId, t);
-      await doNext(target.guildId);
-      await nowPlaying.sync(target.guildId).catch(() => null);
-      return snapshot(target.guildId);
+      keepAdvancing(guildId);
+      clearQueue(guildId);
+      for (const t of tracks) enqueue(guildId, t);
+      await doNext(guildId);
+      await nowPlaying.sync(guildId).catch(() => null);
+      return snapshot(guildId);
     });
   });
 
@@ -284,49 +324,28 @@ export function registerExtRoutes(
   // Append to the session. Starts playback (joining first) if nothing is
   // playing yet, so a cold `queue` still gets audio going.
   server.post("/api/ext/queue", async (request, reply) => {
-    const key = authKey(request, reply, "control");
-    if (!key) return;
-    const body = parseBody(request);
-    const source = typeof body.source === "string" ? body.source.trim() : "";
-    if (!source) return reply.code(400).send({ error: "source required" });
-    const target = await resolveTarget(key.userId, body, reply);
-    if (!target) return;
+    const ctx = await requirePlayable(request, reply);
+    if (!ctx) return;
+    const tracks = await resolveSourceOr400(ctx.source, ctx.key.userId, reply);
+    if (!tracks) return;
 
-    let tracks: Track[];
-    try {
-      tracks = await resolveSource(source, key.userId);
-    } catch (err) {
-      return reply.code(400).send({
-        error: err instanceof Error ? err.message.slice(0, 200) : "Couldn't resolve source",
-      });
-    }
-
+    const { guildId } = ctx.target;
     const status = (await runtime()
-      .voice.status(target.guildId)
-      .catch(() => null)) as { connected?: boolean; playing?: boolean } | null;
+      .voice.status(guildId)
+      .catch(() => null)) as { playing?: boolean } | null;
     const coldStart = !status?.playing;
-    if (coldStart) {
-      try {
-        await runtime().voice.join(
-          target.channelId
-            ? { guildId: target.guildId, channelId: target.channelId }
-            : { guildId: target.guildId, userId: key.userId },
-        );
-      } catch {
-        return reply.code(409).send({ error: "Couldn't join your voice channel" });
-      }
-    }
+    if (coldStart && !(await joinOr409(ctx.target, ctx.key.userId, reply))) return;
 
-    const epochAtStart = getEpoch(target.guildId);
-    return withGuildLock(target.guildId, async () => {
-      if (getEpoch(target.guildId) !== epochAtStart) {
+    const epochAtStart = getEpoch(guildId);
+    return withGuildLock(guildId, async () => {
+      if (getEpoch(guildId) !== epochAtStart) {
         return reply.code(409).send({ error: "Session changed — retry." });
       }
-      keepAdvancing(target.guildId);
-      for (const t of tracks) enqueue(target.guildId, t);
-      if (coldStart) await doNext(target.guildId);
-      await nowPlaying.sync(target.guildId).catch(() => null);
-      return snapshot(target.guildId);
+      keepAdvancing(guildId);
+      for (const t of tracks) enqueue(guildId, t);
+      if (coldStart) await doNext(guildId);
+      await nowPlaying.sync(guildId).catch(() => null);
+      return snapshot(guildId);
     });
   });
 

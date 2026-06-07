@@ -73,10 +73,7 @@ function rowToRecord(row: ApiKeyRow): ApiKeyRecord {
   return {
     id: row.id,
     userId: row.user_id,
-    scopes: row.scopes
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s): s is ApiKeyScope => VALID_SCOPES.includes(s as ApiKeyScope)),
+    scopes: normalizeScopes(row.scopes.split(",")),
     label: row.label,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
