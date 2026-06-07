@@ -25,12 +25,16 @@ import { runtime } from "./runtime.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import {
+  type LoopMode,
   type Track,
   clearQueue,
   enqueue,
   getCurrent,
   getEpoch,
   getState,
+  getUpcoming,
+  setAutoplay,
+  setLoop,
 } from "./queue.js";
 import { doNext, doPrev, doPause, doStop } from "./playback-actions.js";
 import {
@@ -45,10 +49,24 @@ import {
 const CONTROL_MIN_INTERVAL_MS = 500;
 const lastControlAt = new Map<string, number>();
 
+/** Cap the upcoming-queue list a status poll returns — a long radio
+ *  session could otherwise echo back hundreds of entries every few s. */
+const QUEUE_VIEW_LIMIT = 20;
+
+const LOOP_MODES: LoopMode[] = ["off", "track", "queue"];
+
 interface AuthedKey {
   keyId: string;
   userId: string;
   scopes: ApiKeyScope[];
+}
+
+/** One voice.locate hit — where the key's user is currently sitting. */
+interface VoiceMatch {
+  guildId: string;
+  guildName?: string | null;
+  channelId: string;
+  channelName?: string | null;
 }
 
 /** Resolved playback target for a request. */
@@ -104,7 +122,12 @@ export function registerExtRoutes(
       reply.code(401).send({ error: "Invalid or revoked API key" });
       return null;
     }
-    if (!claims.scopes.includes(need)) {
+    // `control` implies `read` (you can't sensibly control without seeing
+    // state), so a control key satisfies a read requirement too.
+    const ok =
+      claims.scopes.includes(need) ||
+      (need === "read" && claims.scopes.includes("control"));
+    if (!ok) {
       reply.code(403).send({ error: `API key lacks '${need}' scope` });
       return null;
     }
@@ -132,10 +155,20 @@ export function registerExtRoutes(
     return (b as Record<string, unknown>) ?? {};
   }
 
+  /** Where is the key's user sitting right now? Returns the (possibly
+   *  empty) list of voice channels across guilds the bot shares with them.
+   *  Best-effort — a locate failure resolves to no matches. */
+  async function locate(userId: string): Promise<VoiceMatch[]> {
+    const res = (await runtime()
+      .botRpc("/api/plugin/voice.locate", { user_id: userId })
+      .catch(() => null)) as { matches?: VoiceMatch[] } | null;
+    return Array.isArray(res?.matches) ? (res as { matches: VoiceMatch[] }).matches : [];
+  }
+
   /**
    * Resolve which guild (and ideally channel) this request acts on.
-   * Precedence: explicit body.guildId → bot voice.locate of the key's
-   * user. Replies + returns null on failure so callers just `return`.
+   * Precedence: explicit body.guildId → the user's sole current VC.
+   * Replies + returns null on failure so callers just `return`.
    */
   async function resolveTarget(
     userId: string,
@@ -144,36 +177,22 @@ export function registerExtRoutes(
   ): Promise<Target | null> {
     const explicit = typeof body.guildId === "string" ? body.guildId.trim() : "";
     if (explicit) return { guildId: explicit };
-    try {
-      const res = (await runtime().botRpc("/api/plugin/voice.locate", {
-        user_id: userId,
-      })) as { guildId?: string; channelId?: string } | null;
-      if (res && typeof res.guildId === "string") {
-        return {
-          guildId: res.guildId,
-          ...(typeof res.channelId === "string" ? { channelId: res.channelId } : {}),
-        };
-      }
-      reply.code(502).send({ error: "voice.locate returned no guild" });
-      return null;
-    } catch (err) {
-      const status = (err as { status?: number }).status;
-      if (status === 404) {
-        reply.code(409).send({
-          error: "You're not in a voice channel I can see — join one first.",
-        });
-        return null;
-      }
-      if (status === 409) {
-        reply.code(409).send({
-          error:
-            "You're in voice channels on more than one server — pass `guildId` to pick one.",
-        });
-        return null;
-      }
-      reply.code(502).send({ error: "Couldn't locate your voice channel" });
+    const matches = await locate(userId);
+    if (matches.length === 1) {
+      return { guildId: matches[0].guildId, channelId: matches[0].channelId };
+    }
+    if (matches.length === 0) {
+      reply.code(409).send({
+        error: "You're not in a voice channel I can see — join one first.",
+      });
       return null;
     }
+    reply.code(409).send({
+      error:
+        "You're in voice channels on more than one server — pass `guildId` to pick one.",
+      candidates: matches,
+    });
+    return null;
   }
 
   /** Resolve a source string to the Track(s) to enqueue (mirrors the
@@ -197,40 +216,101 @@ export function registerExtRoutes(
     return [track];
   }
 
-  /** Compact playback snapshot — the external contract's status shape. */
-  async function snapshot(guildId: string): Promise<Record<string, unknown>> {
+  /** Card-shaped view of a queue track for the panel. (Library metadata
+   *  like author/duration isn't on the queue Track — it'd need a per-poll
+   *  library join — so the panel renders from label + cover.) */
+  function trackView(t: Track): Record<string, unknown> {
+    return {
+      label: t.label,
+      ...(t.qid !== undefined ? { qid: t.qid } : {}),
+      ...(t.coverUrl ? { coverUrl: t.coverUrl } : {}),
+    };
+  }
+
+  /** Voice-status fields the panel uses (superset of the SDK's VoiceStatus
+   *  — channelName / guildName are bot-side additions). */
+  interface VoiceStatusFull {
+    connected?: boolean;
+    channelId?: string | null;
+    channelName?: string | null;
+    guildName?: string | null;
+    playing?: boolean;
+    paused?: boolean;
+    listeners?: number;
+  }
+
+  /**
+   * The playback session for a guild: what the bot is connected to + the
+   * current track and upcoming queue (all plugin-owned state, plus the
+   * bot's channel name from voice.status). `userChannelId`, when known,
+   * sets `inYourChannel` so the panel can tell "the bot is in YOUR VC"
+   * apart from "the bot is playing elsewhere in this server".
+   */
+  async function sessionSnapshot(
+    guildId: string,
+    userChannelId?: string | null,
+  ): Promise<Record<string, unknown>> {
     const s = getState(guildId);
     const status = (await runtime()
       .voice.status(guildId)
-      .catch(() => null)) as
-      | { channelId?: string | null; paused?: boolean; playing?: boolean }
-      | null;
+      .catch(() => null)) as VoiceStatusFull | null;
     const cur = s ? getCurrent(s) : null;
+    const upcoming = s ? getUpcoming(s) : [];
+    const botChannelId = status?.channelId ?? null;
     return {
       guildId,
-      channelId: status?.channelId ?? null,
+      botConnected: status?.connected === true,
+      botChannelId,
+      botChannelName: status?.channelName ?? null,
+      inYourChannel:
+        userChannelId != null ? botChannelId === userChannelId : null,
+      listeners: typeof status?.listeners === "number" ? status.listeners : null,
       playing: status?.playing === true,
       paused: status?.paused === true,
       loop: s?.loop ?? "off",
       autoplay: s?.autoplay ?? false,
-      current: cur ? { label: cur.label, ...(cur.coverUrl ? { coverUrl: cur.coverUrl } : {}) } : null,
-      queueLength: s ? s.tracks.length : 0,
+      current: cur ? trackView(cur) : null,
+      queue: upcoming.slice(0, QUEUE_VIEW_LIMIT).map(trackView),
+      queueLength: upcoming.length,
     };
   }
 
   // ── GET /api/ext/status ─────────────────────────────────────────────
-  // GET has no JSON body in most browsers, so the guild override comes
-  // from `?guildId=`; absent that, voice.locate resolves it.
+  // The panel's single poll: presence (is the key's user in a VC the bot
+  // can reach?) + the session for the relevant guild + everything needed
+  // to render controls. Never errors on "not in voice" — it reports
+  // `presence.reachable:false` so the panel can show a calm hint.
+  //
+  // `?guildId=` overrides which guild's session to show (lets the panel
+  // keep showing a session even after the user steps out of voice).
   server.get<{ Querystring: { guildId?: string } }>(
     "/api/ext/status",
     async (request, reply) => {
       const key = authKey(request, reply, "read");
       if (!key) return;
       const q = (request.query as { guildId?: string } | undefined) ?? {};
-      const hint = typeof q.guildId === "string" ? { guildId: q.guildId } : {};
-      const target = await resolveTarget(key.userId, hint, reply);
-      if (!target) return;
-      return snapshot(target.guildId);
+      const forced = typeof q.guildId === "string" ? q.guildId.trim() : "";
+
+      const matches = await locate(key.userId);
+      const here = matches.length === 1 ? matches[0] : null;
+      const presence = {
+        reachable: matches.length >= 1,
+        ambiguous: matches.length > 1,
+        guildId: here?.guildId ?? null,
+        guildName: here?.guildName ?? null,
+        channelId: here?.channelId ?? null,
+        channelName: here?.channelName ?? null,
+        candidates: matches.length > 1 ? matches : [],
+      };
+
+      // Which guild's session to show: explicit override → the user's sole
+      // current VC. (Ambiguous / absent + no override → no session.)
+      const sessionGuildId = forced || here?.guildId || null;
+      const session = sessionGuildId
+        ? await sessionSnapshot(sessionGuildId, here?.channelId ?? null)
+        : null;
+
+      return { user: { id: key.userId }, presence, session };
     },
   );
 
@@ -316,7 +396,7 @@ export function registerExtRoutes(
       for (const t of tracks) enqueue(guildId, t);
       await doNext(guildId);
       await nowPlaying.sync(guildId).catch(() => null);
-      return snapshot(guildId);
+      return sessionSnapshot(guildId, ctx.target.channelId ?? null);
     });
   });
 
@@ -345,11 +425,15 @@ export function registerExtRoutes(
       for (const t of tracks) enqueue(guildId, t);
       if (coldStart) await doNext(guildId);
       await nowPlaying.sync(guildId).catch(() => null);
-      return snapshot(guildId);
+      return sessionSnapshot(guildId, ctx.target.channelId ?? null);
     });
   });
 
   // ── Transport controls ──────────────────────────────────────────────
+  // Each mirrors a now-playing card button. The op runs under the guild
+  // lock; the response is the refreshed session so the panel updates in
+  // one round-trip. `parseBody` is read once up front so a body-carried
+  // `guildId` / `mode` / `on` reaches both resolveTarget and the op.
   async function control(
     request: FastifyRequest,
     reply: FastifyReply,
@@ -363,7 +447,7 @@ export function registerExtRoutes(
       keepAdvancing(target.guildId);
       await op(target.guildId);
       await nowPlaying.sync(target.guildId).catch(() => null);
-      return snapshot(target.guildId);
+      return sessionSnapshot(target.guildId, target.channelId ?? null);
     });
   }
 
@@ -380,5 +464,20 @@ export function registerExtRoutes(
     const body = parseBody(request);
     const paused = typeof body.paused === "boolean" ? body.paused : undefined;
     return control(request, reply, (g) => doPause(g, paused));
+  });
+  server.post("/api/ext/loop", (request, reply) => {
+    const body = parseBody(request);
+    const mode = body.mode;
+    if (typeof mode !== "string" || !LOOP_MODES.includes(mode as LoopMode)) {
+      return reply.code(400).send({ error: "mode must be off/track/queue" });
+    }
+    return control(request, reply, async (g) => setLoop(g, mode as LoopMode));
+  });
+  server.post("/api/ext/autoplay", (request, reply) => {
+    const body = parseBody(request);
+    if (typeof body.on !== "boolean") {
+      return reply.code(400).send({ error: "`on` (boolean) required" });
+    }
+    return control(request, reply, async (g) => setAutoplay(g, body.on as boolean));
   });
 }
