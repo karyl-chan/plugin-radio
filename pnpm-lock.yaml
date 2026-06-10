@@ -15,8 +15,8 @@ importers:
         specifier: ^5.0.0
         version: 5.0.1(vue@3.5.34(typescript@5.9.3))
       '@karyl-chan/plugin-sdk':
-        specifier: ^0.8.0
-        version: 0.8.0(discord-api-types@0.38.48)(vue@3.5.34(typescript@5.9.3))
+        specifier: ^0.10.0
+        version: 0.10.0(discord-api-types@0.38.48)(vue@3.5.34(typescript@5.9.3))
       '@karyl-chan/ui':
         specifier: ^0.1.0
         version: 0.1.0(@iconify/vue@5.0.1(vue@3.5.34(typescript@5.9.3)))(@popperjs/core@2.11.8)(nanoid@3.3.12)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3)))(vue-router@4.6.4(vue@3.5.34(typescript@5.9.3)))(vue@3.5.34(typescript@5.9.3))
@@ -442,13 +442,16 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@karyl-chan/plugin-sdk@0.8.0':
-    resolution: {integrity: sha512-6qsWJY3HndgTlBQYmKAnv95Daad2e35A8e/iYHp+UH7MQFZbNN3xXN7schEWaL3FW7noN4khMcgxRJ8C9uf5DQ==}
+  '@karyl-chan/plugin-sdk@0.10.0':
+    resolution: {integrity: sha512-EEcm5W1GjJem7UIwetfrTDrT7XOchsnjGAKVCEjopFW7Rhjo+PC4+rBcPZf3FZAkJedTyoru+NxEE2EDiRxwDw==}
     engines: {node: '>=22'}
     peerDependencies:
       discord-api-types: '>=0.38.0 <0.39.0'
+      ioredis: ^5.4.1
       vue: ^3.5.0
     peerDependenciesMeta:
+      ioredis:
+        optional: true
       vue:
         optional: true
 
@@ -1486,7 +1489,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@karyl-chan/plugin-sdk@0.8.0(discord-api-types@0.38.48)(vue@3.5.34(typescript@5.9.3))':
+  '@karyl-chan/plugin-sdk@0.10.0(discord-api-types@0.38.48)(vue@3.5.34(typescript@5.9.3))':
     dependencies:
       discord-api-types: 0.38.48
       fastify: 5.8.5
