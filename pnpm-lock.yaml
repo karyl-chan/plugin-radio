@@ -18,8 +18,8 @@ importers:
         specifier: ^0.10.0
         version: 0.10.0(discord-api-types@0.38.48)(vue@3.5.34(typescript@5.9.3))
       '@karyl-chan/ui':
-        specifier: ^0.1.0
-        version: 0.1.0(@iconify/vue@5.0.1(vue@3.5.34(typescript@5.9.3)))(@popperjs/core@2.11.8)(nanoid@3.3.12)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3)))(vue-router@4.6.4(vue@3.5.34(typescript@5.9.3)))(vue@3.5.34(typescript@5.9.3))
+        specifier: ^0.3.0
+        version: 0.3.0(@iconify/vue@5.0.1(vue@3.5.34(typescript@5.9.3)))(@popperjs/core@2.11.8)(nanoid@3.3.12)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3)))(vue-router@4.6.4(vue@3.5.34(typescript@5.9.3)))(vue@3.5.34(typescript@5.9.3))
       '@popperjs/core':
         specifier: ^2.11.8
         version: 2.11.8
@@ -455,8 +455,8 @@ packages:
       vue:
         optional: true
 
-  '@karyl-chan/ui@0.1.0':
-    resolution: {integrity: sha512-4FnNCalp1RSfSXSMWOmIx+ZSykwiERx8gGrBBasFJH7gLMRQLy0e60uzgkXovtmfyF/MpNZj4o9ut64jVJJ2ng==}
+  '@karyl-chan/ui@0.3.0':
+    resolution: {integrity: sha512-9689NeUNy8Ykv7xbEuEVL89i/A2F5OwfYXu/riI76eBytHPNEWigIkVfHDINgVBXqrHbCtIhN9XyQAiIQDZojA==}
     engines: {node: '>=22'}
     peerDependencies:
       '@iconify/vue': '>=5'
@@ -1496,7 +1496,7 @@ snapshots:
     optionalDependencies:
       vue: 3.5.34(typescript@5.9.3)
 
-  '@karyl-chan/ui@0.1.0(@iconify/vue@5.0.1(vue@3.5.34(typescript@5.9.3)))(@popperjs/core@2.11.8)(nanoid@3.3.12)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3)))(vue-router@4.6.4(vue@3.5.34(typescript@5.9.3)))(vue@3.5.34(typescript@5.9.3))':
+  '@karyl-chan/ui@0.3.0(@iconify/vue@5.0.1(vue@3.5.34(typescript@5.9.3)))(@popperjs/core@2.11.8)(nanoid@3.3.12)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.34(typescript@5.9.3)))(vue-router@4.6.4(vue@3.5.34(typescript@5.9.3)))(vue@3.5.34(typescript@5.9.3))':
     dependencies:
       '@iconify/vue': 5.0.1(vue@3.5.34(typescript@5.9.3))
       '@popperjs/core': 2.11.8

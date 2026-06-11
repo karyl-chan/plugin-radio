@@ -195,13 +195,10 @@ async function save() {
 </template>
 
 <style scoped>
-/* @karyl-chan/ui AppModal leaves body padding to the caller — match
-   what the old local AppModal hard-coded so layout stays unchanged. */
 .edit-form {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
-  padding: 1rem;
 }
 .field { display: flex; flex-direction: column; gap: 0.3rem; }
 .field label {
