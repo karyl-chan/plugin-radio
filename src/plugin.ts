@@ -87,7 +87,6 @@ export const seenGuilds = new Set<string>();
  *  `/radio play`). */
 const LOCK_FREE_SUBS = new Set([
   "stations",
-  "manage",
   "np",
   "queuelist",
 ]);
