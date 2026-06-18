@@ -11,6 +11,7 @@ import {
   definePluginCommand,
   definePluginComponent,
   defineGuildFeature,
+  defineWebUI,
 } from "@karyl-chan/plugin-sdk";
 import {
   type LoopMode,
@@ -466,6 +467,9 @@ export default function buildPlugin() {
           "Access the radio admin WebUI — manage / edit / delete library tracks, and upload private audio files for the library.",
       }),
     ],
+    // Manage WebUI is reached from the bot admin plugin page (which mints a
+    // manage token for the logged-in admin), served at <base>/manage.
+    webUI: defineWebUI(),
     guildFeatures: [
       defineGuildFeature({
         key: "radio",
@@ -590,10 +594,6 @@ export default function buildPlugin() {
                 { type: "sub_command", name: "stations" },
                 "cmd.stations.description",
               ),
-              localizedOption(
-                { type: "sub_command", name: "manage" },
-                "cmd.manage.description",
-              ),
             ],
             handler: async (ctx): Promise<CommandReply> => {
               const guildId = ctx.guildId;
@@ -613,45 +613,6 @@ export default function buildPlugin() {
                 switch (sub) {
                   case "stations":
                     return formatStationList(locale);
-
-                  case "manage": {
-                    // 15-min bot JWT — only used to bootstrap a plugin-side
-                    // manage session (access + refresh) on first load; after
-                    // that the SPA refreshes itself for up to 1 day per tab.
-                    const res = (await ctx.botRpc("/api/plugin/auth.session", {
-                      user_id: userId,
-                      kind: "manage",
-                    })) as { allowed?: boolean; token?: string } | null;
-                    // botRpc returns null on a non-2xx (e.g. the bot hasn't
-                    // approved this plugin's `auth.session` RPC scope yet), and a
-                    // truthy { allowed:false } when the *user* lacks the capability.
-                    if (res === null) {
-                      return {
-                        content: t(locale, "manage.botRejected", {
-                          pluginKey: PLUGIN_KEY,
-                        }),
-                        ephemeral: true,
-                      };
-                    }
-                    if (res.allowed !== true || typeof res.token !== "string") {
-                      return {
-                        content: t(locale, "manage.notAllowed", {
-                          pluginKey: PLUGIN_KEY,
-                        }),
-                        ephemeral: true,
-                      };
-                    }
-                    return {
-                      content: t(locale, "manage.linkHeader"),
-                      components: [
-                        linkButtonRow(
-                          t(locale, "manage.openButton"),
-                          `${effectiveBase()}/?token=${res.token}`,
-                        ),
-                      ],
-                      ephemeral: true,
-                    };
-                  }
 
                   case "np": {
                     // Same embed + control buttons as the public now-playing

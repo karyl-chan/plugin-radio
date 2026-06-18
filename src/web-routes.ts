@@ -1308,7 +1308,7 @@ export async function registerWebRoutes(
       "utf-8",
     );
   }
-  server.get("/", async (_request, reply) => {
+  const serveSpa = (reply: FastifyReply) => {
     reply.header("Content-Type", "text/html; charset=utf-8");
     // Inline JS/CSS SPA; outbound resources: same-origin uploaded covers
     // + external https thumbnail URLs.
@@ -1333,5 +1333,11 @@ export async function registerWebRoutes(
     const html = htmlContent.replace("<head>", `<head>${injectedScript}`);
 
     return reply.send(html);
-  });
+  };
+
+  // Session (playback) tier — play/queue buttons link here with a session
+  // token. Manage tier — the bot admin UI links to /manage with a manage
+  // token; same SPA bundle, the client picks the flow from the path.
+  server.get("/", async (_request, reply) => serveSpa(reply));
+  server.get("/manage", async (_request, reply) => serveSpa(reply));
 }

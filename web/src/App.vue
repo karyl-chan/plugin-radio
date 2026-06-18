@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { bootstrapPluginSession, decodeJwt } from "@karyl-chan/plugin-sdk/web";
+import { bootstrapPluginSession } from "@karyl-chan/plugin-sdk/web";
 import { AppToast } from "@karyl-chan/ui";
 import DeniedView from "./views/DeniedView.vue";
 import ManageView from "./views/ManageView.vue";
@@ -8,7 +8,6 @@ import SessionView from "./views/SessionView.vue";
 import { setApi } from "./api";
 
 const PLUGIN_KEY = "karyl-radio";
-const MANAGE_CAP_TOKEN = `plugin:${PLUGIN_KEY}:manage`;
 
 type View = "loading" | "denied" | "session" | "manage";
 const view = ref<View>("loading");
@@ -19,26 +18,20 @@ const deniedMessage = ref<string | null>(null);
 // around: the plugin's access token is opaque to the SPA.
 const sessionGuildId = ref<string | null>(null);
 
-function isManageClaims(claims: { capabilities?: unknown } | null): boolean {
-  const caps = Array.isArray(claims?.capabilities)
-    ? (claims!.capabilities as string[])
-    : [];
-  return caps.includes("admin") || caps.includes(MANAGE_CAP_TOKEN);
-}
-
 function deny(msg: string): void {
   deniedMessage.value = msg;
   view.value = "denied";
 }
 
 async function bootstrap(): Promise<void> {
-  // Radio's link URLs don't carry `?surface=` — the bot CLI emits a
-  // single `/?token=…` (manage or session, distinguished by the JWT's
-  // capabilities). Peek at the token's caps ourselves to pick the SDK
-  // flow: exchange + refresh pair for manage; direct bearer for session.
-  const urlToken = new URLSearchParams(window.location.search).get("token");
-  const urlClaims = urlToken ? decodeJwt(urlToken) : null;
-  const wantsExchange = urlClaims ? isManageClaims(urlClaims) : false;
+  // Mode is decided by PATH, not token caps: the bot admin UI links to
+  // `<base>/manage` (exchange → access/refresh pair); play/queue buttons
+  // link to `<base>/` (direct session bearer). Path is stable across tab
+  // reloads, so the manage SPA resumes its refresh pair without
+  // re-inspecting any token.
+  const wantsExchange = window.location.pathname
+    .replace(/\/+$/, "")
+    .endsWith("/manage");
 
   const handle = await bootstrapPluginSession({
     pluginKey: PLUGIN_KEY,
