@@ -80,6 +80,18 @@ export interface UserPlaylist {
 }
 
 /**
+ * The "logged-in as" identity for the WebUI top-right chip, resolved by
+ * the server from the token's user (GET /api/session/:id/viewer or
+ * /api/me). Null on the server side means an anonymous public viewer (the
+ * now-playing embed token).
+ */
+export interface ViewerProfile {
+  id: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
+/**
  * One voice.locate hit — where the viewing member is currently sitting,
  * as returned by GET /api/me/locate. Drives the personal page's Play
  * button target.

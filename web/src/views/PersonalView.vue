@@ -54,6 +54,26 @@ async function pollLocate(): Promise<void> {
 }
 
 const canPlay = computed(() => selectedGuildId.value !== null);
+
+// Open the playback session page for the selected guild, carrying this
+// member's identity (so that page opens "logged in"). Navigates away on
+// success.
+const openingPlayer = ref(false);
+async function openPlayer(): Promise<void> {
+  const guildId = selectedGuildId.value;
+  if (!guildId) return;
+  openingPlayer.value = true;
+  try {
+    const r = await api<{ url: string }>(
+      "GET",
+      `/api/me/session-link/${encodeURIComponent(guildId)}`,
+    );
+    window.location.href = r.url;
+  } catch (e: any) {
+    error(e.message || "Couldn't open the player");
+    openingPlayer.value = false;
+  }
+}
 const voiceStatusText = computed(() => {
   const n = voiceMatches.value.length;
   if (n === 0) return "Join a voice channel to play a playlist here.";
@@ -162,6 +182,13 @@ onBeforeUnmount(() => {
         :class="{ 'voice-dot--on': voiceMatches.length > 0 }"
       />
       <span class="grow">{{ voiceStatusText }}</span>
+      <button
+        v-if="canPlay"
+        type="button"
+        class="voice-open"
+        :disabled="openingPlayer"
+        @click="openPlayer"
+      >Open player →</button>
     </div>
     <select
       v-if="voiceMatches.length > 1"
@@ -315,6 +342,20 @@ onBeforeUnmount(() => {
 .voice-picker {
   width: 100%;
 }
+.voice-open {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent, #5865f2);
+  white-space: nowrap;
+}
+.voice-open:hover:not(:disabled) { text-decoration: underline; }
+.voice-open:disabled { opacity: 0.5; cursor: default; }
 
 /* The list-row + fresh-key + intro styles below mirror ManageView's scoped
    styles (Vue scoped CSS can't be shared) — keep the two in sync. */

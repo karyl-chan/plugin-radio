@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { bootstrapPluginSession } from "@karyl-chan/plugin-sdk/web";
-import { AppToast } from "@karyl-chan/ui";
+import { AppToast, UserAvatar } from "@karyl-chan/ui";
 import DeniedView from "./views/DeniedView.vue";
 import ManageView from "./views/ManageView.vue";
 import PersonalView from "./views/PersonalView.vue";
 import SessionView from "./views/SessionView.vue";
-import { setApi } from "./api";
+import { setApi, api } from "./api";
+import type { ViewerProfile } from "./types";
 
 const PLUGIN_KEY = "karyl-radio";
 
@@ -19,9 +20,34 @@ const deniedMessage = ref<string | null>(null);
 // around: the plugin's access token is opaque to the SPA.
 const sessionGuildId = ref<string | null>(null);
 
+// The "logged-in as" profile (name + avatar) for the top-right chip.
+// Null = anonymous (the public now-playing token) or not yet resolved.
+const viewer = ref<ViewerProfile | null>(null);
+
 function deny(msg: string): void {
   deniedMessage.value = msg;
   view.value = "denied";
+}
+
+/** Resolve who's viewing (session or /me tier) for the identity chip.
+ *  Best-effort: an anonymous public token or an RPC hiccup just leaves
+ *  the chip off. */
+async function loadViewer(
+  mode: "session" | "personal",
+  guildId: string | null,
+  userId?: string | null,
+): Promise<void> {
+  // The public now-playing embed token carries a synthetic radio-np: user
+  // — anonymous, no chip. (The server enforces this too.)
+  if (userId && userId.startsWith("radio-np:")) return;
+  try {
+    const path =
+      mode === "session" ? `/api/session/${guildId}/viewer` : "/api/me";
+    const r = await api<{ viewer: ViewerProfile | null }>("GET", path);
+    viewer.value = r.viewer ?? null;
+  } catch {
+    // leave the chip off
+  }
 }
 
 async function bootstrap(): Promise<void> {
@@ -67,6 +93,7 @@ async function bootstrap(): Promise<void> {
       return;
     }
     view.value = "personal";
+    void loadViewer("personal", null, handle.claims?.userId);
     return;
   }
 
@@ -92,6 +119,7 @@ async function bootstrap(): Promise<void> {
   if (typeof handle.claims.guildId === "string") {
     sessionGuildId.value = handle.claims.guildId;
     view.value = "session";
+    void loadViewer("session", handle.claims.guildId, handle.claims.userId);
     return;
   }
   deny("This link doesn't grant access to a playback session.");
@@ -102,7 +130,7 @@ void bootstrap();
 const modeLabel = computed(() => {
   if (view.value === "session") return "playback session";
   if (view.value === "manage") return "admin · library";
-  if (view.value === "personal") return "my playlists";
+  if (view.value === "personal") return "personal";
   return "";
 });
 </script>
@@ -112,6 +140,14 @@ const modeLabel = computed(() => {
     <header class="app-header">
       <h1>📻 Karyl Radio</h1>
       <span class="mode">{{ modeLabel }}</span>
+      <div v-if="viewer" class="viewer" :title="viewer.displayName">
+        <UserAvatar
+          :src="viewer.avatarUrl"
+          :name="viewer.displayName"
+          :size="26"
+        />
+        <span class="viewer-name">{{ viewer.displayName }}</span>
+      </div>
     </header>
 
     <div v-if="view === 'loading'" class="center-msg">Connecting…</div>
@@ -129,3 +165,25 @@ const modeLabel = computed(() => {
     <AppToast />
   </div>
 </template>
+
+<style scoped>
+/* Top-right "logged-in as" chip. margin-left:auto pushes it to the end of
+   the flex header; align-self:center overrides the header's baseline. */
+.viewer {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.viewer-name {
+  font-size: 0.85rem;
+  font-weight: 550;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12rem;
+}
+</style>

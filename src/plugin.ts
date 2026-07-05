@@ -488,6 +488,11 @@ export default function buildPlugin() {
       "interactions.respond",
       "interactions.followup",
       "auth.session",
+      // Resolve the viewing user's name + avatar for the WebUI "logged-in
+      // as" chip: members.get when a guild is known (session page),
+      // users.get for the guildless /me page.
+      "members.get",
+      "users.get",
     ],
     storage: { guildKv: false },
     components: [

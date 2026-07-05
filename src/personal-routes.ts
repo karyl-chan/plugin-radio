@@ -18,7 +18,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { verifyPluginSession } from "@karyl-chan/plugin-sdk";
-import { getSessionVerifyKeyFn } from "./web-routes.js";
+import { getSessionVerifyKeyFn, effectiveBase } from "./web-routes.js";
 import { isHttpUrl } from "./downloader.js";
 import { issueKey, listKeys, normalizeScopes, revokeKey } from "./api-keys.js";
 import {
@@ -35,10 +35,8 @@ import { clearQueue, enqueue, getEpoch } from "./queue.js";
 import { doNext } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
-
-/** Synthetic user prefix on the public now-playing token (now-playing.ts).
- *  Never a real member — must never reach anyone's personal data. */
-const NP_SYNTHETIC_PREFIX = "radio-np:";
+import { runtime } from "./runtime.js";
+import { resolveViewer, NP_SYNTHETIC_PREFIX } from "./viewer.js";
 
 export function registerPersonalRoutes(
   server: FastifyInstance,
@@ -109,8 +107,39 @@ export function registerPersonalRoutes(
   server.get("/api/me", async (request, reply) => {
     const me = authPersonal(request, reply);
     if (!me) return;
-    return { userId: me.userId };
+    // /me tokens always carry a real user (guildless) → resolve the
+    // logged-in profile for the top-right identity chip.
+    return { userId: me.userId, viewer: await resolveViewer(me.userId, null) };
   });
+
+  // Mint a playback-session link for a guild the member is currently in
+  // voice on, carrying their real identity so the session page opens
+  // "logged in" (drives the clickable voice-status on the personal page).
+  server.get<{ Params: { guildId: string } }>(
+    "/api/me/session-link/:guildId",
+    async (request, reply) => {
+      const me = authPersonal(request, reply);
+      if (!me) return;
+      const { guildId } = request.params;
+      const matches = await locate(me.userId);
+      if (!matches.some((m) => m.guildId === guildId)) {
+        return reply
+          .code(409)
+          .send({ error: "You're not in a voice channel on that server." });
+      }
+      const res = (await runtime()
+        .botRpc("/api/plugin/auth.session", {
+          user_id: me.userId,
+          kind: "session",
+          guild_id: guildId,
+        })
+        .catch(() => null)) as { token?: string } | null;
+      if (!res || typeof res.token !== "string") {
+        return reply.code(502).send({ error: "Couldn't create a session link." });
+      }
+      return { url: `${effectiveBase()}/?token=${res.token}` };
+    },
+  );
 
   // Where the member is sitting right now (drives the Play button's
   // channel target). Empty matches → not in any visible voice channel.

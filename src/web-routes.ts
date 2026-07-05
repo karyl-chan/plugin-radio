@@ -84,6 +84,7 @@ import {
   type Playlist,
   type PlaylistPatch,
 } from "./playlists.js";
+import { resolveViewer } from "./viewer.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const MANAGE_CAP = "manage";
@@ -805,6 +806,20 @@ export async function registerWebRoutes(
       const { guildId } = request.params;
       if (!authSession(request, reply, guildId)) return;
       return sessionSnapshot(guildId);
+    },
+  );
+
+  // Who is looking at this session page. A token from an ephemeral
+  // /radio reply carries the real user (→ logged in); the public
+  // now-playing embed token carries the synthetic radio-np: user
+  // (→ anonymous, viewer:null). Powers the top-right identity chip.
+  server.get<{ Params: { guildId: string } }>(
+    "/api/session/:guildId/viewer",
+    async (request, reply) => {
+      const { guildId } = request.params;
+      const claims = authSession(request, reply, guildId);
+      if (!claims) return;
+      return { viewer: await resolveViewer(claims.userId, guildId) };
     },
   );
 
