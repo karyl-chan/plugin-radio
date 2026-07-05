@@ -16,7 +16,7 @@ import { getMusicDir, ensureMusicDirSync } from "./downloader.js";
  */
 
 const DB_FILE = "radio.db";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 let db: DB | null = null;
 
@@ -116,6 +116,25 @@ function migrate(conn: DB): void {
       value       TEXT NOT NULL,
       PRIMARY KEY (playlist_id, position)
     );
+
+    -- v4: per-user favorites — a flat SET of "source" strings a member
+    -- starred (a library track id, an http(s) URL, or a station key), each
+    -- with a display label/cover captured at star time. Powers the ☆
+    -- toggle on the player queue, the add-to-queue autocomplete, and the
+    -- /me favorites tab. Owner-scoped like the playlists above; unordered
+    -- (a set), so no side table.
+    CREATE TABLE IF NOT EXISTS user_favorites (
+      id         TEXT PRIMARY KEY,
+      owner_id   TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      label      TEXT NOT NULL,
+      cover_url  TEXT,
+      added_at   INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS user_favorites_owner_source_idx
+      ON user_favorites(owner_id, source);
+    CREATE INDEX IF NOT EXISTS user_favorites_owner_idx
+      ON user_favorites(owner_id);
   `);
   conn.pragma(`user_version = ${SCHEMA_VERSION}`);
 }

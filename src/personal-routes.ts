@@ -22,6 +22,12 @@ import { getSessionVerifyKeyFn, effectiveBase } from "./web-routes.js";
 import { isHttpUrl } from "./downloader.js";
 import { issueKey, listKeys, normalizeScopes, revokeKey } from "./api-keys.js";
 import {
+  getUserFavorite,
+  listUserFavorites,
+  removeUserFavorite,
+  toggleUserFavorite,
+} from "./user-favorites.js";
+import {
   type UserPlaylistPatch,
   addUserPlaylist,
   getUserPlaylist,
@@ -296,4 +302,80 @@ export function registerPersonalRoutes(
     if (!ok) return reply.code(404).send({ error: "Not found" });
     return { ok: true };
   });
+
+  // ── favorites (the player ☆ toggle, the add-to-queue autocomplete, and
+  //    the /me favorites tab all share these) ──────────────────────────
+  server.get("/api/me/favorites", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    return { favorites: listUserFavorites(me.userId) };
+  });
+
+  // ☆ toggle. `source` is the WebUI's per-item key (trackId ?? sourceUrl);
+  // label/cover are display caches captured at star time.
+  server.post("/api/me/favorites/toggle", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const body = parseBody(request);
+    try {
+      return toggleUserFavorite({
+        ownerId: me.userId,
+        source: typeof body.source === "string" ? body.source : "",
+        label: typeof body.label === "string" ? body.label : undefined,
+        coverUrl: typeof body.coverUrl === "string" ? body.coverUrl : undefined,
+      });
+    } catch (e) {
+      return reply
+        .code(400)
+        .send({ error: e instanceof Error ? e.message : "Invalid favorite" });
+    }
+  });
+
+  server.delete("/api/me/favorites/:id", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const { id } = request.params as { id: string };
+    const ok = removeUserFavorite(id, me.userId);
+    if (!ok) return reply.code(404).send({ error: "Not found" });
+    return { ok: true };
+  });
+
+  // Append a favorite to the member's current voice queue (cold-starts if
+  // idle). Mirrors POST /api/ext/queue: resolve the target guild (explicit
+  // guildId wins, else voice.locate), join only when nothing's playing.
+  server.post<{ Params: { id: string } }>(
+    "/api/me/favorites/:id/queue",
+    async (request, reply) => {
+      const me = authPersonal(request, reply);
+      if (!me) return;
+      const { id } = request.params;
+      const fav = getUserFavorite(id, me.userId);
+      if (!fav) return reply.code(404).send({ error: "Not found" });
+      const target = await resolveTarget(me.userId, parseBody(request), reply);
+      if (!target) return; // resolveTarget already replied (409)
+      const { tracks } = await resolveEntriesToTracks([fav.source], me.userId);
+      if (tracks.length === 0) {
+        return reply
+          .code(409)
+          .send({ error: "This favorite couldn't be played right now." });
+      }
+      const { guildId } = target;
+      const status = (await runtime()
+        .voice.status(guildId)
+        .catch(() => null)) as { playing?: boolean } | null;
+      const coldStart = !status?.playing;
+      if (coldStart && !(await joinOr409(target, me.userId, reply))) return;
+      const epochAtStart = getEpoch(guildId);
+      return withGuildLock(guildId, async () => {
+        if (getEpoch(guildId) !== epochAtStart) {
+          return reply.code(409).send({ error: "Session changed — retry." });
+        }
+        keepAdvancing(guildId);
+        for (const t of tracks) enqueue(guildId, t);
+        if (coldStart) await doNext(guildId);
+        await nowPlaying.sync(guildId).catch(() => null);
+        return { ok: true, guildId };
+      });
+    },
+  );
 }
