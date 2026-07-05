@@ -64,6 +64,34 @@ export interface Playlist {
 }
 
 /**
+ * Mirror of the server's UserPlaylist (src/user-playlists.ts). The
+ * per-user, self-service sibling of Playlist — same shape, but owned by a
+ * single member (`ownerId` instead of `createdBy`) and managed from the
+ * personal page (/me) with no `manage` capability.
+ */
+export interface UserPlaylist {
+  id: string;
+  ownerId: string;
+  name: string;
+  description?: string;
+  entries: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * One voice.locate hit — where the viewing member is currently sitting,
+ * as returned by GET /api/me/locate. Drives the personal page's Play
+ * button target.
+ */
+export interface VoiceMatch {
+  guildId: string;
+  guildName?: string | null;
+  channelId: string;
+  channelName?: string | null;
+}
+
+/**
  * Preview shape returned by POST /api/playlists/lookup-entry — lets the
  * editor show a friendly label / cover / metadata for an entry instead
  * of the raw source string.

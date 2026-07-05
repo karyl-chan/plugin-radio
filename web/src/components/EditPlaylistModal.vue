@@ -5,20 +5,45 @@ import { AppButton, AppModal } from "@karyl-chan/ui";
 import Thumb from "./Thumb.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
-import type {
-  LibraryTrack,
-  Playlist,
-  PlaylistEntryInfo,
-} from "../types";
+import type { LibraryTrack, PlaylistEntryInfo } from "../types";
 
-const props = defineProps<{
-  /** The playlist being edited; null = "create new". */
-  playlist: Playlist | null;
-  visible: boolean;
-  /** Library snapshot — passed in instead of re-fetched per modal open
-   *  so the "+ from library" picker is instant. */
-  library: LibraryTrack[];
-}>();
+/** The fields this modal actually touches — shared by the manager-owned
+ *  Playlist and the per-user UserPlaylist, so the modal stays agnostic to
+ *  which tier (manage vs. personal) it's editing. */
+interface EditablePlaylist {
+  id: string;
+  name: string;
+  description?: string;
+  entries: string[];
+}
+
+const props = withDefaults(
+  defineProps<{
+    /** The playlist being edited; null = "create new". */
+    playlist: EditablePlaylist | null;
+    visible: boolean;
+    /** Library snapshot — passed in instead of re-fetched per modal open
+     *  so the "+ from library" picker is instant. Empty in personal mode
+     *  (personal users can't browse the private library). */
+    library?: LibraryTrack[];
+    /** "manage" (default) → /api/playlists with the library picker.
+     *  "personal" → /api/me/playlists, paste-only (no library access). */
+    mode?: "manage" | "personal";
+  }>(),
+  { library: () => [], mode: "manage" },
+);
+
+/** Route prefix for this modal's tier — manage vs. personal playlists. */
+const apiBase = computed(() =>
+  props.mode === "personal" ? "/api/me/playlists" : "/api/playlists",
+);
+
+/** Personal users can't reference library track IDs (no library browse). */
+const pastePlaceholder = computed(() =>
+  props.mode === "personal"
+    ? "Station key, http(s) URL, or track title…"
+    : "Library track ID, station key, http(s) URL…",
+);
 
 const emit = defineEmits<{
   (e: "close"): void;
@@ -125,7 +150,7 @@ async function primePreview(source: string): Promise<void> {
   try {
     const info = await api<PlaylistEntryInfo>(
       "POST",
-      "/api/playlists/lookup-entry",
+      `${apiBase.value}/lookup-entry`,
       { source },
     );
     previews.value = { ...previews.value, [source]: info };
@@ -231,7 +256,7 @@ async function save(): Promise<void> {
   try {
     const srcs = entries.value.map((e) => e.src);
     if (isCreate.value) {
-      await api("POST", "/api/playlists", {
+      await api("POST", apiBase.value, {
         name: name.value,
         description: description.value,
         entries: srcs,
@@ -240,7 +265,7 @@ async function save(): Promise<void> {
     } else {
       await api(
         "PATCH",
-        `/api/playlists/${encodeURIComponent(props.playlist!.id)}`,
+        `${apiBase.value}/${encodeURIComponent(props.playlist!.id)}`,
         {
           name: name.value,
           description: description.value,
@@ -320,6 +345,7 @@ async function save(): Promise<void> {
 
         <div class="add-row">
           <AppButton
+            v-if="mode !== 'personal'"
             variant="ghost"
             size="sm"
             @click="pickerOpen = !pickerOpen; pasteOpen = false"
@@ -334,13 +360,13 @@ async function save(): Promise<void> {
         <div v-if="pasteOpen" class="paste-row">
           <input
             v-model="pasteText"
-            placeholder="Library track ID, station key, http(s) URL…"
+            :placeholder="pastePlaceholder"
             @keydown.enter.prevent="commitPaste"
           />
           <AppButton variant="ghost" size="sm" @click="commitPaste">Add</AppButton>
         </div>
 
-        <div v-if="pickerOpen" class="picker">
+        <div v-if="pickerOpen && mode !== 'personal'" class="picker">
           <input
             v-model="pickerSearch"
             placeholder="Search library…"

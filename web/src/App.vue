@@ -4,12 +4,13 @@ import { bootstrapPluginSession } from "@karyl-chan/plugin-sdk/web";
 import { AppToast } from "@karyl-chan/ui";
 import DeniedView from "./views/DeniedView.vue";
 import ManageView from "./views/ManageView.vue";
+import PersonalView from "./views/PersonalView.vue";
 import SessionView from "./views/SessionView.vue";
 import { setApi } from "./api";
 
 const PLUGIN_KEY = "karyl-radio";
 
-type View = "loading" | "denied" | "session" | "manage";
+type View = "loading" | "denied" | "session" | "manage" | "personal";
 const view = ref<View>("loading");
 const deniedMessage = ref<string | null>(null);
 // When the SPA boots into session mode, the JWT we read from the URL
@@ -25,13 +26,14 @@ function deny(msg: string): void {
 
 async function bootstrap(): Promise<void> {
   // Mode is decided by PATH, not token caps: the bot admin UI links to
-  // `<base>/manage` (exchange → access/refresh pair); play/queue buttons
-  // link to `<base>/` (direct session bearer). Path is stable across tab
-  // reloads, so the manage SPA resumes its refresh pair without
-  // re-inspecting any token.
-  const wantsExchange = window.location.pathname
-    .replace(/\/+$/, "")
-    .endsWith("/manage");
+  // `<base>/manage` (exchange → access/refresh pair); `/radio me` links to
+  // `<base>/me` (direct guildless bearer); play/queue buttons link to
+  // `<base>/` (direct session bearer). Path is stable across tab reloads,
+  // so the manage SPA resumes its refresh pair without re-inspecting any
+  // token.
+  const path = window.location.pathname.replace(/\/+$/, "");
+  const wantsExchange = path.endsWith("/manage");
+  const wantsPersonal = path.endsWith("/me");
 
   const handle = await bootstrapPluginSession({
     pluginKey: PLUGIN_KEY,
@@ -50,6 +52,21 @@ async function bootstrap(): Promise<void> {
 
   if (!handle.isAuthenticated) {
     deny("No valid token. Run /radio manage or use a play/queue response button.");
+    return;
+  }
+
+  // Personal tier (`/me`) — the guildless bearer alone is enough; every
+  // request is userId-scoped and PersonalView re-validates via GET /api/me.
+  // On a fresh load reject a guild-scoped token up front (the personal
+  // routes only accept the guildless `/radio me` token); on a tab reload
+  // (no decoded claims) trust the restored bearer and let a stale token
+  // 401 into the denied view.
+  if (wantsPersonal) {
+    if (handle.claims && handle.claims.guildId) {
+      deny("This link is guild-scoped — run /radio me to open your personal page.");
+      return;
+    }
+    view.value = "personal";
     return;
   }
 
@@ -85,6 +102,7 @@ void bootstrap();
 const modeLabel = computed(() => {
   if (view.value === "session") return "playback session";
   if (view.value === "manage") return "admin · library";
+  if (view.value === "personal") return "my playlists";
   return "";
 });
 </script>
@@ -106,6 +124,7 @@ const modeLabel = computed(() => {
       :guild-id="sessionGuildId"
     />
     <ManageView v-else-if="view === 'manage'" />
+    <PersonalView v-else-if="view === 'personal'" />
 
     <AppToast />
   </div>
