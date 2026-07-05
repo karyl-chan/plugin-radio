@@ -217,6 +217,22 @@ export function clearQueue(guildId: string): void {
 }
 
 /**
+ * Fully empty the playlist — drop the played history AND the current track
+ * AND the upcoming queue, resetting the cursor. This is what `/radio play`
+ * (and the WebUI/ext "play", which replace the session) want: a fresh start
+ * with nothing behind it. Distinct from `clearQueue` (which keeps the
+ * current track playing + the played history, only dropping upcoming) and
+ * from `reset` (which deletes the whole GuildState, losing loop/autoplay);
+ * `resetQueue` preserves the session's loop / autoplay settings.
+ */
+export function resetQueue(guildId: string): void {
+  const s = ensure(guildId);
+  bumpEpoch(guildId);
+  s.tracks.length = 0;
+  s.cursor = -1;
+}
+
+/**
  * Snapshot the current session epoch. Bumps on every `clearQueue` /
  * `reset`. Callers that resolve external sources outside the guild
  * lock should capture the epoch first, then re-check it under the

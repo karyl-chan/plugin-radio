@@ -27,7 +27,7 @@ import * as nowPlaying from "./now-playing.js";
 import {
   type LoopMode,
   type Track,
-  clearQueue,
+  resetQueue,
   enqueue,
   getCurrent,
   getEpoch,
@@ -320,7 +320,7 @@ export function registerExtRoutes(
         return reply.code(409).send({ error: "Session changed — retry." });
       }
       keepAdvancing(guildId);
-      clearQueue(guildId);
+      resetQueue(guildId);
       for (const t of tracks) enqueue(guildId, t);
       await doNext(guildId);
       await nowPlaying.sync(guildId).catch(() => null);

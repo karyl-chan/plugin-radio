@@ -18,7 +18,7 @@ import {
   type Track,
   DEFAULT_AUTOPLAY_FETCH_COUNT,
   MAX_AUTOPLAY_FETCH_COUNT,
-  clearQueue,
+  resetQueue,
   commitCursor,
   enqueue,
   getState,
@@ -274,7 +274,7 @@ async function playBulk(
   guildId: string,
   tracks: Track[],
 ): Promise<Track | null> {
-  clearQueue(guildId);
+  resetQueue(guildId);
   for (const t of tracks) enqueue(guildId, t);
   let started: Track | null = null;
   for (let i = 0; i < 5 && !started; i++) {
@@ -1089,7 +1089,7 @@ export default function buildPlugin() {
                     if (joinErr) return joinErr;
                     // `play` is a fresh start — discard whatever was queued
                     // before (use `/radio queue` to keep & append instead).
-                    clearQueue(guildId);
+                    resetQueue(guildId);
                     enqueue(guildId, resolved);
                     const candidate = peekNext(guildId);
                     // candidate is guaranteed (we just enqueued); the `!`

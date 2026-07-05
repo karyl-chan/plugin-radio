@@ -37,7 +37,7 @@ import {
 } from "./user-playlists.js";
 import { resolveEntriesToTracks } from "./resolver.js";
 import { locate, resolveTarget, joinOr409 } from "./voice-target.js";
-import { clearQueue, enqueue, getEpoch } from "./queue.js";
+import { resetQueue, enqueue, getEpoch } from "./queue.js";
 import { doNext } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
@@ -267,7 +267,7 @@ export function registerPersonalRoutes(
         return reply.code(409).send({ error: "Session changed — retry." });
       }
       keepAdvancing(guildId);
-      clearQueue(guildId);
+      resetQueue(guildId);
       for (const t of tracks) enqueue(guildId, t);
       await doNext(guildId);
       await nowPlaying.sync(guildId).catch(() => null);
