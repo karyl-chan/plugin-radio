@@ -59,6 +59,7 @@ import {
   setRadioSessionVerifyKey,
 } from "./web-routes.js";
 import { registerExtRoutes } from "./ext-routes.js";
+import { registerPersonalRoutes } from "./personal-routes.js";
 import {
   type PlayOutcome,
   playTrack,
@@ -89,6 +90,7 @@ const LOCK_FREE_SUBS = new Set([
   "stations",
   "np",
   "queuelist",
+  "me",
 ]);
 
 /** Env-var fallback for the browser-reachable base URL. Only used when the
@@ -118,6 +120,9 @@ interface CachedToken {
 }
 const SESSION_TOKEN_REFRESH_MARGIN_MS = 30 * 60_000;
 const sessionTokens = new Map<string, CachedToken>();
+// Personal-page tokens are guildless (no guild_id) and carry the member's
+// real Discord id, so they're cached per user rather than per guild.
+const personalTokens = new Map<string, CachedToken>();
 
 async function getSessionToken(
   botRpc: BotRpcFn,
@@ -152,6 +157,43 @@ async function webuiUrlFor(
 ): Promise<string | null> {
   const token = await getSessionToken(botRpc, userId, guildId);
   return token ? `${effectiveBase()}/?token=${token}` : null;
+}
+
+/** Mint (and cache) a guildless personal-page token for `userId`. Same bot
+ *  `auth.session` RPC as the guild session token, but with NO `guild_id`,
+ *  so the JWT carries `guildId: null` — the personal routes' access anchor
+ *  is the embedded userId, not a guild. */
+async function getPersonalToken(
+  botRpc: BotRpcFn,
+  userId: string,
+): Promise<string | null> {
+  const cached = personalTokens.get(userId);
+  if (
+    cached &&
+    cached.expiresAt - Date.now() > SESSION_TOKEN_REFRESH_MARGIN_MS
+  ) {
+    return cached.token;
+  }
+  const res = (await botRpc("/api/plugin/auth.session", {
+    user_id: userId,
+    kind: "session",
+    // no guild_id → guildId: null in the minted token
+  })) as { token?: string; expiresAt?: number } | null;
+  if (!res || typeof res.token !== "string") return null;
+  personalTokens.set(userId, {
+    token: res.token,
+    expiresAt: typeof res.expiresAt === "number" ? res.expiresAt : Date.now(),
+  });
+  return res.token;
+}
+
+/** Personal-page WebUI URL for a member, or null if a token couldn't be minted. */
+async function personalUrlFor(
+  botRpc: BotRpcFn,
+  userId: string,
+): Promise<string | null> {
+  const token = await getPersonalToken(botRpc, userId);
+  return token ? `${effectiveBase()}/me?token=${token}` : null;
 }
 
 /** Discord component-v1 action row with a single Link button. */
@@ -593,6 +635,10 @@ export default function buildPlugin() {
                 { type: "sub_command", name: "stations" },
                 "cmd.stations.description",
               ),
+              localizedOption(
+                { type: "sub_command", name: "me" },
+                "cmd.me.description",
+              ),
             ],
             handler: async (ctx): Promise<CommandReply> => {
               const guildId = ctx.guildId;
@@ -612,6 +658,25 @@ export default function buildPlugin() {
                 switch (sub) {
                   case "stations":
                     return formatStationList(locale);
+
+                  case "me": {
+                    // Ephemeral private link to the personal page — manage
+                    // your own playlists + API keys, and start a playlist
+                    // in whatever voice channel you're in. The token is
+                    // guildless and carries your identity, so keep it private.
+                    const url = await personalUrlFor(ctx.botRpc, userId);
+                    if (!url) return t(locale, "error.me.tokenFailed");
+                    return {
+                      embeds: [
+                        {
+                          color: EMBED_COLOR,
+                          description: t(locale, "me.linkBody"),
+                        },
+                      ],
+                      components: [linkButtonRow(t(locale, "me.openButton"), url)],
+                      ephemeral: true,
+                    };
+                  }
 
                   case "np": {
                     // Same embed + control buttons as the public now-playing
@@ -1062,6 +1127,9 @@ export default function buildPlugin() {
       // guild set so a play/queue started via the extension keeps
       // advancing like a slash-command session.
       registerExtRoutes(server, seenGuilds);
+      // Personal page (guildless session-JWT auth). Same seenGuilds set so
+      // a playlist started from /me keeps auto-advancing.
+      registerPersonalRoutes(server, seenGuilds);
     },
   });
 }

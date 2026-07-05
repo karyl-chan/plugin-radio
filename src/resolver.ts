@@ -208,36 +208,28 @@ export async function resolvePlaylist(
 }
 
 /**
- * Resolve a stored playlist by name into queue-ready Tracks. Each entry
- * is fed through `resolveAnyTrack` (the same dispatch as `/radio play`),
- * so a single playlist can mix library tracks, station keys, URLs and
- * YouTube videos. Failed entries are reported in `skipped` and dropped
- * — one dead link or a since-deleted library track shouldn't block the
- * rest of the list.
+ * Resolve a playlist's raw entry strings into queue-ready Tracks, using
+ * the same per-entry dispatch as `/radio play`: a URL entry is kept lazy
+ * (a fresh stream URL is resolved right before playback, so we don't burn
+ * N × yt-dlp seconds under the guild lock just to load a list), while a
+ * library id / station key / title is resolved eagerly (cheap local
+ * lookup). Failed entries are collected in `skipped` and dropped so one
+ * dead link or a since-deleted library track can't block the rest. Each
+ * resolved Track is stamped `source: "playlist"` (+ `playlistId`, when
+ * given) for provenance.
  *
- * Returns `null` when no playlist by that name exists; callers fall back
- * to single-source resolution.
+ * Shared by the manager-owned stored playlists (`resolveStoredPlaylist`)
+ * and the per-user personal playlists (the `/me` play route).
  */
-export async function resolveStoredPlaylist(
-  name: string,
+export async function resolveEntriesToTracks(
+  entries: readonly string[],
   userId: string | null,
-): Promise<{
-  playlist: Playlist;
-  tracks: Track[];
-  skipped: string[];
-} | null> {
-  const playlist = await findPlaylistByName(name);
-  if (!playlist) return null;
+  playlistId?: string,
+): Promise<{ tracks: Track[]; skipped: string[] }> {
   const tracks: Track[] = [];
   const skipped: string[] = [];
-  for (const entry of playlist.entries) {
+  for (const entry of entries) {
     let resolved: Track | null;
-    // URL entries get the same lazy treatment as YouTube playlist
-    // expansions — we don't want to spend N × yt-dlp seconds under
-    // the guild lock just to load a playlist. The advance loop /
-    // playTrack will resolve a fresh stream URL right before playback.
-    // Library / station keys / titles are resolved eagerly because
-    // they're cheap (local cache lookup, no network).
     if (isHttpUrl(entry)) {
       const downloaded = await findBySourceUrl(entry);
       resolved = downloaded
@@ -255,9 +247,34 @@ export async function resolveStoredPlaylist(
       continue;
     }
     resolved.source = "playlist";
-    resolved.playlistId = playlist.id;
+    if (playlistId) resolved.playlistId = playlistId;
     tracks.push(resolved);
   }
+  return { tracks, skipped };
+}
+
+/**
+ * Resolve a stored (manager-owned) playlist by name into queue-ready
+ * Tracks. Thin wrapper over `resolveEntriesToTracks`.
+ *
+ * Returns `null` when no playlist by that name exists; callers fall back
+ * to single-source resolution.
+ */
+export async function resolveStoredPlaylist(
+  name: string,
+  userId: string | null,
+): Promise<{
+  playlist: Playlist;
+  tracks: Track[];
+  skipped: string[];
+} | null> {
+  const playlist = await findPlaylistByName(name);
+  if (!playlist) return null;
+  const { tracks, skipped } = await resolveEntriesToTracks(
+    playlist.entries,
+    userId,
+    playlist.id,
+  );
   return { playlist, tracks, skipped };
 }
 

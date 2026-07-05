@@ -108,6 +108,12 @@ let _sessionVerifyKey: (() => string | null) | null = null;
 export function setRadioSessionVerifyKey(getter: () => string | null): void {
   _sessionVerifyKey = getter;
 }
+/** Current plugin-session JWT verify key (or null if not registered yet).
+ *  Exposed so the personal-page routes (`personal-routes.ts`) verify the
+ *  same bot-signed tokens without re-wiring the deferred setter. */
+export function getSessionVerifyKeyFn(): string | null {
+  return _sessionVerifyKey?.() ?? null;
+}
 
 let _publicBaseUrlGetter: (() => string | undefined) | null = null;
 /** Wire the getter for the SDK-provided publicBaseUrl (set after start()). */
@@ -1340,4 +1346,7 @@ export async function registerWebRoutes(
   // token; same SPA bundle, the client picks the flow from the path.
   server.get("/", async (_request, reply) => serveSpa(reply));
   server.get("/manage", async (_request, reply) => serveSpa(reply));
+  // Personal tier — `/radio me` links here with a guildless session token;
+  // same SPA bundle, the client picks the personal flow from the path.
+  server.get("/me", async (_request, reply) => serveSpa(reply));
 }

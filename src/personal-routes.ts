@@ -1,0 +1,266 @@
+/**
+ * Personal page routes — `/api/me/*`.
+ *
+ * The self-service tier: any ordinary Discord member (no `manage`
+ * capability) can curate their own playlists and API keys, and start one
+ * of their playlists in whichever voice channel they're currently in.
+ *
+ * Auth is the bot's plugin-session JWT, exactly like the `/api/session/*`
+ * routes, but WITHOUT a guild scope — `/radio me` mints a guildless token
+ * (`guildId: null`) carrying the member's real Discord id, and every
+ * route here is keyed on that `userId` (the same ownership discipline the
+ * API-key routes use). It reuses the shared voice-target plumbing
+ * (`voice-target.ts`) for "play wherever I am", and the shared per-user
+ * stores (`user-playlists.ts`, `api-keys.ts`).
+ *
+ * Kept in its own module so this third auth tier doesn't get tangled into
+ * web-routes.ts's manage/session surface.
+ */
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { verifyPluginSession } from "@karyl-chan/plugin-sdk";
+import { getSessionVerifyKeyFn } from "./web-routes.js";
+import { isHttpUrl } from "./downloader.js";
+import { issueKey, listKeys, normalizeScopes, revokeKey } from "./api-keys.js";
+import {
+  type UserPlaylistPatch,
+  addUserPlaylist,
+  getUserPlaylist,
+  listUserPlaylists,
+  removeUserPlaylist,
+  updateUserPlaylist,
+} from "./user-playlists.js";
+import { resolveEntriesToTracks } from "./resolver.js";
+import { locate, resolveTarget, joinOr409 } from "./voice-target.js";
+import { clearQueue, enqueue, getEpoch } from "./queue.js";
+import { doNext } from "./playback-actions.js";
+import { withGuildLock } from "./guild-lock.js";
+import * as nowPlaying from "./now-playing.js";
+
+/** Synthetic user prefix on the public now-playing token (now-playing.ts).
+ *  Never a real member — must never reach anyone's personal data. */
+const NP_SYNTHETIC_PREFIX = "radio-np:";
+
+export function registerPersonalRoutes(
+  server: FastifyInstance,
+  seenGuilds: Set<string>,
+): void {
+  /** Re-register a guild with the auto-advance loop after a WebUI play. */
+  const keepAdvancing = (guildId: string): void => {
+    seenGuilds.add(guildId);
+  };
+
+  function parseBody(request: FastifyRequest): Record<string, unknown> {
+    const b = request.body;
+    if (typeof b === "string") {
+      try {
+        return JSON.parse(b) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    }
+    return (b as Record<string, unknown>) ?? {};
+  }
+
+  /** Personal gate: a real member's guildless plugin-session JWT. Verifies
+   *  the bot's Ed25519 signature (same key as the session routes), then
+   *  rejects the synthetic now-playing user and any guild-scoped token so
+   *  the personal tier is only ever reached via `/radio me`. */
+  function authPersonal(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): { userId: string } | null {
+    const verifyKey = getSessionVerifyKeyFn();
+    if (!verifyKey) {
+      reply.code(503).send({
+        error:
+          "session verification unavailable — plugin not yet registered with the bot",
+      });
+      return null;
+    }
+    const header = request.headers.authorization;
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+    if (!token) {
+      reply.code(401).send({ error: "Missing authorization" });
+      return null;
+    }
+    const claims = verifyPluginSession(token, verifyKey);
+    if (!claims) {
+      reply.code(401).send({ error: "Invalid or expired token" });
+      return null;
+    }
+    if (claims.userId.startsWith(NP_SYNTHETIC_PREFIX)) {
+      reply.code(403).send({ error: "This link isn't valid for a personal page." });
+      return null;
+    }
+    // Guild-scoped session tokens (play/queue links) belong to the
+    // playback page — the personal page is reached only via the guildless
+    // token `/radio me` mints. Enforce the boundary explicitly.
+    if (claims.guildId !== null) {
+      reply.code(403).send({ error: "Run /radio me to open your personal page." });
+      return null;
+    }
+    return { userId: claims.userId };
+  }
+
+  // ── identity + presence ─────────────────────────────────────────────
+  // Identity probe — lets the SPA recover after a tab reload (token in
+  // sessionStorage, no decoded claims) by confirming the token still
+  // verifies and echoing back the user id.
+  server.get("/api/me", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    return { userId: me.userId };
+  });
+
+  // Where the member is sitting right now (drives the Play button's
+  // channel target). Empty matches → not in any visible voice channel.
+  server.get("/api/me/locate", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    return { matches: await locate(me.userId) };
+  });
+
+  // ── playlists ───────────────────────────────────────────────────────
+  server.get("/api/me/playlists", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    return { playlists: await listUserPlaylists(me.userId) };
+  });
+
+  server.post("/api/me/playlists", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const body = parseBody(request);
+    try {
+      const playlist = await addUserPlaylist({
+        ownerId: me.userId,
+        name: typeof body.name === "string" ? body.name : "",
+        description:
+          typeof body.description === "string" ? body.description : undefined,
+        entries: Array.isArray(body.entries)
+          ? (body.entries as string[])
+          : undefined,
+      });
+      return { playlist };
+    } catch (e) {
+      return reply
+        .code(400)
+        .send({ error: e instanceof Error ? e.message : "Invalid playlist" });
+    }
+  });
+
+  server.get("/api/me/playlists/:id", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const { id } = request.params as { id: string };
+    const playlist = await getUserPlaylist(id, me.userId);
+    if (!playlist) return reply.code(404).send({ error: "Not found" });
+    return { playlist };
+  });
+
+  server.patch("/api/me/playlists/:id", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const { id } = request.params as { id: string };
+    const body = parseBody(request);
+    const patch: UserPlaylistPatch = {};
+    if (typeof body.name === "string") patch.name = body.name;
+    if (typeof body.description === "string") patch.description = body.description;
+    if (Array.isArray(body.entries)) patch.entries = body.entries as string[];
+    try {
+      const playlist = await updateUserPlaylist(id, me.userId, patch);
+      if (!playlist) return reply.code(404).send({ error: "Not found" });
+      return { playlist };
+    } catch (e) {
+      return reply
+        .code(400)
+        .send({ error: e instanceof Error ? e.message : "Invalid patch" });
+    }
+  });
+
+  server.delete("/api/me/playlists/:id", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const { id } = request.params as { id: string };
+    const ok = await removeUserPlaylist(id, me.userId);
+    if (!ok) return reply.code(404).send({ error: "Not found" });
+    return { ok: true };
+  });
+
+  // Cosmetic entry preview for the editor. Personal users can't browse the
+  // private library, so we never surface library hits — just classify
+  // URL vs. free-form. (A bare title still resolves against the library at
+  // *play* time; this only labels the row.)
+  server.post("/api/me/playlists/lookup-entry", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const body = parseBody(request);
+    const source = typeof body.source === "string" ? body.source.trim() : "";
+    if (!source) return reply.code(400).send({ error: "Missing source" });
+    if (isHttpUrl(source)) return { kind: "url", label: source };
+    return { kind: "unknown", label: source };
+  });
+
+  // Start a personal playlist in the member's current voice channel. Mirrors
+  // POST /api/ext/play: resolve the voice target (explicit guildId or
+  // voice.locate), join, then clear+enqueue+play under the guild lock with
+  // an epoch guard so a concurrent session change bails cleanly.
+  server.post("/api/me/playlists/:id/play", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const { id } = request.params as { id: string };
+    const pl = await getUserPlaylist(id, me.userId);
+    if (!pl) return reply.code(404).send({ error: "Not found" });
+    if (pl.entries.length === 0) {
+      return reply.code(409).send({ error: "This playlist is empty." });
+    }
+    const target = await resolveTarget(me.userId, parseBody(request), reply);
+    if (!target) return; // resolveTarget already replied (409)
+    if (!(await joinOr409(target, me.userId, reply))) return;
+    const { tracks } = await resolveEntriesToTracks(pl.entries, me.userId, pl.id);
+    if (tracks.length === 0) {
+      return reply
+        .code(409)
+        .send({ error: "None of this playlist's entries could be played right now." });
+    }
+    const { guildId } = target;
+    const epochAtStart = getEpoch(guildId);
+    return withGuildLock(guildId, async () => {
+      if (getEpoch(guildId) !== epochAtStart) {
+        return reply.code(409).send({ error: "Session changed — retry." });
+      }
+      keepAdvancing(guildId);
+      clearQueue(guildId);
+      for (const t of tracks) enqueue(guildId, t);
+      await doNext(guildId);
+      await nowPlaying.sync(guildId).catch(() => null);
+      return { ok: true, guildId };
+    });
+  });
+
+  // ── API keys (self-service; scoped to the caller) ───────────────────
+  server.get("/api/me/keys", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    return { keys: listKeys(me.userId) };
+  });
+
+  server.post("/api/me/keys", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const body = parseBody(request);
+    const label = typeof body.label === "string" ? body.label : null;
+    const scopes = normalizeScopes(body.scopes);
+    const { record, plaintext } = issueKey({ userId: me.userId, label, scopes });
+    return { key: record, plaintext };
+  });
+
+  server.delete("/api/me/keys/:id", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const { id } = request.params as { id: string };
+    const ok = revokeKey(id, me.userId);
+    if (!ok) return reply.code(404).send({ error: "Not found" });
+    return { ok: true };
+  });
+}

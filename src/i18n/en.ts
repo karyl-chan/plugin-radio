@@ -44,6 +44,8 @@ export const en = {
   "cmd.np.description": "Show what's currently playing (+ WebUI link)",
   "cmd.queuelist.description": "Show the current queue",
   "cmd.stations.description": "List available radio stations",
+  "cmd.me.description":
+    "Get a private link to your personal playlists & API keys",
   "cmd.manage.description":
     "Get a private link to the radio admin WebUI (requires permission)",
 
@@ -66,6 +68,8 @@ export const en = {
     " ({n} couldn't be resolved)",
   "error.voice.joinFailed":
     "⚠ Could not join voice — make sure you're in a voice channel and the bot has permission.",
+  "error.me.tokenFailed":
+    "⚠ Couldn't mint your personal link — please try again in a moment.",
 
   // ── manage subcommand ───────────────────────────────────────────────────
   "manage.botRejected":
@@ -75,6 +79,11 @@ export const en = {
   "manage.linkHeader":
     "🔧 **Karyl Radio — admin WebUI**\nManage downloaded tracks: search, edit metadata, delete. Open within 15 min; your tab session then refreshes itself for up to 1 day.",
   "manage.openButton": "🔧 Open admin WebUI",
+
+  // ── me subcommand (personal page) ───────────────────────────────────────
+  "me.linkBody":
+    "🎵 **Karyl Radio — your personal page**\nManage your own playlists & API keys, and start a playlist in whatever voice channel you're in. This link is private — keep it to yourself.",
+  "me.openButton": "🎵 Open my radio page",
 
   // ── component / now-playing controls ────────────────────────────────────
   "control.notInVoiceAnymore":

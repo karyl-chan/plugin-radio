@@ -40,6 +40,8 @@ export const zhCN: Record<LocaleKey, string> = {
   "cmd.np.description": "显示当前播放中的曲目 (+ WebUI 链接)",
   "cmd.queuelist.description": "显示当前的播放队列",
   "cmd.stations.description": "列出可用的广播电台",
+  "cmd.me.description":
+    "获取你个人播放列表与 API 密钥的私人链接",
   "cmd.manage.description":
     "获取广播管理 WebUI 的私人链接 (需要权限)",
 
@@ -62,6 +64,8 @@ export const zhCN: Record<LocaleKey, string> = {
     " ({n} 首无法解析)",
   "error.voice.joinFailed":
     "⚠ 无法加入语音 — 请确认你已加入语音频道，且 bot 具有相应权限。",
+  "error.me.tokenFailed":
+    "⚠ 无法生成你的个人链接 — 请稍后再试一次。",
 
   // ── manage subcommand ───────────────────────────────────────────────────
   "manage.botRejected":
@@ -71,6 +75,11 @@ export const zhCN: Record<LocaleKey, string> = {
   "manage.linkHeader":
     "🔧 **Karyl 广播 — 管理 WebUI**\n管理已下载的曲目：搜索、编辑元数据、删除。请在 15 分钟内打开；之后标签页可自行续期最长 1 天。",
   "manage.openButton": "🔧 打开管理 WebUI",
+
+  // ── me subcommand (personal page) ───────────────────────────────────────
+  "me.linkBody":
+    "🎵 **Karyl 广播 — 你的个人页面**\n管理你自己的播放列表与 API 密钥，并在你所在的语音频道播放列表。此链接是私人的 — 请勿分享。",
+  "me.openButton": "🎵 打开我的广播页面",
 
   // ── component / now-playing controls ────────────────────────────────────
   "control.notInVoiceAnymore":
