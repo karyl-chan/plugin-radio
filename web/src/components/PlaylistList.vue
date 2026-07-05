@@ -16,22 +16,43 @@ import type { Track } from "../types";
  * cursor row has neither (you can't jump to what's already playing,
  * and removing a row that's streaming is confusing).
  */
-const props = defineProps<{
-  playlist: Track[];
-  cursorQid: number | null;
-  /** qids the user clicked ✕ on; rendered as locally-hidden so the
-   *  list reacts immediately before the server confirms. */
-  pendingRemoveQids: Set<number>;
-  /** qids the user just queued via the Add box that the server hasn't
-   *  echoed back yet. Rendered as muted "adding…" placeholders. */
-  pendingAdds: string[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    playlist: Track[];
+    cursorQid: number | null;
+    /** qids the user clicked ✕ on; rendered as locally-hidden so the
+     *  list reacts immediately before the server confirms. */
+    pendingRemoveQids: Set<number>;
+    /** qids the user just queued via the Add box that the server hasn't
+     *  echoed back yet. Rendered as muted "adding…" placeholders. */
+    pendingAdds: string[];
+    /** Show the ☆ favorite toggle per row (only when logged in). */
+    canFavorite?: boolean;
+    /** The set of favorited source keys (`trackId ?? sourceUrl`) — drives
+     *  the filled/empty ☆. */
+    favoriteSources?: Set<string>;
+  }>(),
+  {
+    canFavorite: false,
+    favoriteSources: () => new Set<string>(),
+  },
+);
 
 const emit = defineEmits<{
   (e: "dequeue", qid: number): void;
   (e: "jump", qid: number): void;
   (e: "reorder", payload: { qid: number; beforeQid: number | null }): void;
+  (e: "toggleFavorite", track: Track): void;
 }>();
+
+/** The favorite key for a row — the same key the store dedupes on. */
+function favKey(t: Track): string | null {
+  return t.trackId ?? t.sourceUrl ?? null;
+}
+function isFav(t: Track): boolean {
+  const k = favKey(t);
+  return !!k && props.favoriteSources.has(k);
+}
 
 /** Visible rows = playlist minus optimistically-removed qids; each row
  *  carries its own `isCursor` flag so the template doesn't re-check
@@ -173,6 +194,14 @@ watch(
       </div>
 
       <div class="actions">
+        <button
+          v-if="canFavorite && favKey(t)"
+          type="button"
+          class="row-action star"
+          :class="{ 'star--on': isFav(t) }"
+          :title="isFav(t) ? 'Remove from favorites' : 'Add to favorites'"
+          @click.stop="emit('toggleFavorite', t)"
+        >{{ isFav(t) ? "★" : "☆" }}</button>
         <AppButton
           v-if="!isCursor"
           variant="ghost"
@@ -315,10 +344,30 @@ watch(
   gap: 0.35rem;
   flex-shrink: 0;
   align-items: center;
-  /* Just the ✕ remove button now (▶ moved to the idx slot). Reserved
-     so a hover-reveal doesn't shift the row's other contents. */
-  min-width: 1.8rem;
+  /* Room for the ☆ favorite + ✕ remove, reserved so a hover-reveal
+     doesn't shift the row's other contents. */
+  min-width: 3.4rem;
   justify-content: flex-end;
+}
+
+/* ☆ favorite toggle. Empty ☆ hover-reveals like the ✕ (via .row-action);
+   a filled ★ (favorited) stays visible so favorites read at a glance. */
+.star {
+  background: transparent;
+  border: 0;
+  padding: 0 0.15rem;
+  margin: 0;
+  font: inherit;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: color var(--transition-fast), opacity var(--transition-fast);
+}
+.star:hover { color: var(--accent); }
+.star.star--on {
+  opacity: 1;
+  color: var(--accent);
 }
 
 /* drag */

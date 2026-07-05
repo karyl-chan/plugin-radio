@@ -80,6 +80,20 @@ export interface UserPlaylist {
 }
 
 /**
+ * Mirror of the server's UserFavorite (src/user-favorites.ts). A starred
+ * "source" (a library track id / http(s) URL / station key) with a display
+ * label + cover captured at star time. `source` is the same key the WebUI
+ * computes per queue item (`track.trackId ?? track.sourceUrl`).
+ */
+export interface UserFavorite {
+  id: string;
+  source: string;
+  label: string;
+  coverUrl?: string;
+  addedAt: number;
+}
+
+/**
  * The "logged-in as" identity for the WebUI top-right chip, resolved by
  * the server from the token's user (GET /api/session/:id/viewer or
  * /api/me). Null on the server side means an anonymous public viewer (the

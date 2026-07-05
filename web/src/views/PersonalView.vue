@@ -2,21 +2,26 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { AppButton, AppTabs, Stack, type TabDef } from "@karyl-chan/ui";
 import EditPlaylistModal from "../components/EditPlaylistModal.vue";
+import Thumb from "../components/Thumb.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
 import { useApiKeys } from "../composables/use-api-keys";
-import type { UserPlaylist, VoiceMatch } from "../types";
+import { useFavorites } from "../composables/use-favorites";
+import type { UserFavorite, UserPlaylist, VoiceMatch } from "../types";
 
 const { ok, error } = useToast();
 
-type Tab = "playlists" | "keys";
+type Tab = "playlists" | "favorites" | "keys";
 const activeTab = ref<Tab>("playlists");
 const tabs: TabDef[] = [
   { key: "playlists", label: "My Playlists" },
+  { key: "favorites", label: "Favorites" },
   { key: "keys", label: "API Keys" },
 ];
 function pickTab(key: string): void {
-  if (key === "playlists" || key === "keys") activeTab.value = key;
+  if (key === "playlists" || key === "favorites" || key === "keys") {
+    activeTab.value = key;
+  }
 }
 
 // ── voice presence ─────────────────────────────────────────────────
@@ -166,6 +171,34 @@ const {
   keySubText,
 } = useApiKeys("/api/me/keys");
 
+// ── favorites ───────────────────────────────────────────────────────
+const { favorites, load: loadFavorites, remove: removeFavorite } = useFavorites();
+const queueingFavId = ref<string | null>(null);
+
+async function queueFavorite(f: UserFavorite): Promise<void> {
+  const guildId = selectedGuildId.value;
+  if (!guildId) {
+    error("Join a voice channel first");
+    return;
+  }
+  queueingFavId.value = f.id;
+  try {
+    await api("POST", `/api/me/favorites/${encodeURIComponent(f.id)}/queue`, {
+      guildId,
+    });
+    ok(`Queued "${f.label}"`);
+  } catch (e: any) {
+    error(e.message || "Couldn't queue this favorite");
+  } finally {
+    queueingFavId.value = null;
+  }
+}
+
+async function removeFav(f: UserFavorite): Promise<void> {
+  if (!confirm(`Remove "${f.label}" from favorites?`)) return;
+  await removeFavorite(f.id);
+}
+
 // "Open player" navigates away with openingPlayer=true. The browser freezes
 // this page into the back-forward cache, so pressing Back restores it with
 // the button still disabled. Clear that in-flight state (and refresh
@@ -179,6 +212,7 @@ function onPageShow(e: PageTransitionEvent): void {
 
 onMounted(() => {
   loadPlaylists();
+  loadFavorites();
   loadKeys();
   pollLocate();
   locateTimer = setInterval(pollLocate, 10_000);
@@ -258,6 +292,44 @@ onBeforeUnmount(() => {
               ✎ Edit
             </AppButton>
             <AppButton variant="danger" size="sm" @click="removePlaylist(p)">
+              🗑
+            </AppButton>
+          </div>
+        </li>
+      </ul>
+    </section>
+  </template>
+
+  <template v-else-if="activeTab === 'favorites'">
+    <div class="card">
+      <div class="row">
+        <span class="grow muted intro">
+          Star tracks from the player to save them here.
+          <strong>+ Queue</strong> adds one to the voice channel you're in.
+        </span>
+      </div>
+    </div>
+
+    <section class="section">
+      <div class="section-title">Favorites</div>
+      <ul class="list">
+        <li v-if="favorites.length === 0" class="empty">
+          No favorites yet — tap the ☆ on a track in the player.
+        </li>
+        <li v-for="f in favorites" :key="f.id" class="item">
+          <Thumb :src="f.coverUrl" />
+          <div class="info">
+            <div class="name">{{ f.label }}</div>
+            <div class="dim" v-if="f.source.startsWith('http')">{{ f.source }}</div>
+          </div>
+          <div class="actions">
+            <AppButton
+              size="sm"
+              :loading="queueingFavId === f.id"
+              :disabled="!canPlay"
+              @click="queueFavorite(f)"
+            >+ Queue</AppButton>
+            <AppButton variant="danger" size="sm" @click="removeFav(f)">
               🗑
             </AppButton>
           </div>

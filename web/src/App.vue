@@ -174,6 +174,7 @@ const meUrl = computed(() => (window.__PLUGIN_BASE__ ?? "") + "/me");
     <SessionView
       v-else-if="view === 'session' && sessionGuildId"
       :guild-id="sessionGuildId"
+      :logged-in="viewer !== null"
     />
     <ManageView v-else-if="view === 'manage'" />
     <PersonalView v-else-if="view === 'personal'" />
