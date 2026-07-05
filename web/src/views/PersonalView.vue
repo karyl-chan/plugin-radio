@@ -166,14 +166,27 @@ const {
   keySubText,
 } = useApiKeys("/api/me/keys");
 
+// "Open player" navigates away with openingPlayer=true. The browser freezes
+// this page into the back-forward cache, so pressing Back restores it with
+// the button still disabled. Clear that in-flight state (and refresh
+// presence, which may be stale) when we're restored from the bfcache.
+function onPageShow(e: PageTransitionEvent): void {
+  if (e.persisted) {
+    openingPlayer.value = false;
+    void pollLocate();
+  }
+}
+
 onMounted(() => {
   loadPlaylists();
   loadKeys();
   pollLocate();
   locateTimer = setInterval(pollLocate, 10_000);
+  window.addEventListener("pageshow", onPageShow);
 });
 onBeforeUnmount(() => {
   if (locateTimer) clearInterval(locateTimer);
+  window.removeEventListener("pageshow", onPageShow);
 });
 </script>
 
