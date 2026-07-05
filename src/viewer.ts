@@ -22,6 +22,22 @@ export interface ViewerProfile {
   avatarUrl: string | null;
 }
 
+/**
+ * The bot's members.get / users.get append `&animated=true` to an animated
+ * avatar URL so a caller can request the animated frame directly. Strip it
+ * back to the still URL: `<UserAvatar animate="hover">` (the WebUI's chip)
+ * expects a still `src` and re-adds the animated param itself only while
+ * hovered. Leaving the bot's param on would make the avatar animate always.
+ */
+function stillAvatarUrl(url: string | null): string | null {
+  if (!url) return null;
+  return url
+    .replace(/([?&])animated=true(?=&|$)/g, "$1")
+    .replace(/\?&/, "?")
+    .replace(/&&/g, "&")
+    .replace(/[?&]$/, "");
+}
+
 /** Synthetic userId prefix minted onto the public now-playing token
  *  (now-playing.ts). A token carrying it is an anonymous public viewer. */
 export const NP_SYNTHETIC_PREFIX = "radio-np:";
@@ -54,7 +70,9 @@ export async function resolveViewer(
       return {
         id,
         displayName: m.displayName,
-        avatarUrl: typeof m.avatarUrl === "string" ? m.avatarUrl : null,
+        avatarUrl: stillAvatarUrl(
+          typeof m.avatarUrl === "string" ? m.avatarUrl : null,
+        ),
       };
     }
   }
@@ -73,7 +91,9 @@ export async function resolveViewer(
     return {
       id,
       displayName,
-      avatarUrl: typeof u.avatarUrl === "string" ? u.avatarUrl : null,
+      avatarUrl: stillAvatarUrl(
+        typeof u.avatarUrl === "string" ? u.avatarUrl : null,
+      ),
     };
   }
   return null;

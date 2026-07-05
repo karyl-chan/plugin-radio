@@ -81,15 +81,14 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
-  // Personal tier (`/me`) — the guildless bearer alone is enough; every
-  // request is userId-scoped and PersonalView re-validates via GET /api/me.
-  // On a fresh load reject a guild-scoped token up front (the personal
-  // routes only accept the guildless `/radio me` token); on a tab reload
-  // (no decoded claims) trust the restored bearer and let a stale token
-  // 401 into the denied view.
+  // Personal tier (`/me`) — authenticated purely by the real userId, so any
+  // real-user token works: guildless (`/radio me`) OR guild-scoped (a
+  // `/radio np|play` link, incl. the one "Open player" swaps in). That's
+  // what lets /me and the player page share one login. Only the synthetic
+  // public now-playing user is barred (backend enforces this too).
   if (wantsPersonal) {
-    if (handle.claims && handle.claims.guildId) {
-      deny("This link is guild-scoped — run /radio me to open your personal page.");
+    if (handle.claims?.userId?.startsWith("radio-np:")) {
+      deny("This link isn't valid for a personal page.");
       return;
     }
     view.value = "personal";

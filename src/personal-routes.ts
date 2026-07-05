@@ -90,13 +90,14 @@ export function registerPersonalRoutes(
       reply.code(403).send({ error: "This link isn't valid for a personal page." });
       return null;
     }
-    // Guild-scoped session tokens (play/queue links) belong to the
-    // playback page — the personal page is reached only via the guildless
-    // token `/radio me` mints. Enforce the boundary explicitly.
-    if (claims.guildId !== null) {
-      reply.code(403).send({ error: "Run /radio me to open your personal page." });
-      return null;
-    }
+    // Authenticate purely by the real userId — the /api/me/* routes are all
+    // userId-scoped (the caller's own playlists / keys). We intentionally do
+    // NOT require a guildless token: any real-user session token works,
+    // guildless (`/radio me`) OR guild-scoped (a `/radio np|play` link). That
+    // makes /me and the player page share ONE login — the guild session
+    // token opens both, so navigating between them (and the browser back
+    // button) never trips over a token swap. Only the synthetic public
+    // now-playing user (rejected above) is barred.
     return { userId: claims.userId };
   }
 
@@ -107,8 +108,9 @@ export function registerPersonalRoutes(
   server.get("/api/me", async (request, reply) => {
     const me = authPersonal(request, reply);
     if (!me) return;
-    // /me tokens always carry a real user (guildless) → resolve the
-    // logged-in profile for the top-right identity chip.
+    // Resolve the logged-in profile for the top-right identity chip. Uses
+    // the global user (users.get) — a /me token may be guildless or
+    // guild-scoped, so we don't assume a guild here.
     return { userId: me.userId, viewer: await resolveViewer(me.userId, null) };
   });
 

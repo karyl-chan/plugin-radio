@@ -68,6 +68,10 @@ async function openPlayer(): Promise<void> {
       "GET",
       `/api/me/session-link/${encodeURIComponent(guildId)}`,
     );
+    // Same-tab is fine: /me authenticates by userId and accepts any
+    // real-user token, so the guild session token we navigate to also logs
+    // into /me — the browser back button returns here without a re-auth.
+    // We navigate away, so no need to reset openingPlayer on success.
     window.location.href = r.url;
   } catch (e: any) {
     error(e.message || "Couldn't open the player");
