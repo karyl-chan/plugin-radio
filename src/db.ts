@@ -16,7 +16,7 @@ import { getMusicDir, ensureMusicDirSync } from "./downloader.js";
  */
 
 const DB_FILE = "radio.db";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 let db: DB | null = null;
 
@@ -89,6 +89,33 @@ function migrate(conn: DB): void {
       revoked      INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS api_keys_user_idx ON api_keys(user_id);
+
+    -- v3: per-user personal playlists. Structurally the same as the
+    -- global \`playlists\` tables, but every row is owned by a single
+    -- Discord user (\`owner_id\`) and the name uniqueness is per-owner
+    -- (two users may both have a "favourites"), so the WebUI personal
+    -- page (/me) can let ordinary members curate their own lists without
+    -- the \`manage\` capability. Kept as a separate table so the shared,
+    -- manager-owned \`playlists\` above are untouched.
+    CREATE TABLE IF NOT EXISTS user_playlists (
+      id          TEXT PRIMARY KEY,
+      owner_id    TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      description TEXT,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS user_playlists_owner_name_idx
+      ON user_playlists(owner_id, lower(name));
+    CREATE INDEX IF NOT EXISTS user_playlists_owner_idx
+      ON user_playlists(owner_id);
+
+    CREATE TABLE IF NOT EXISTS user_playlist_entries (
+      playlist_id TEXT NOT NULL REFERENCES user_playlists(id) ON DELETE CASCADE,
+      position    INTEGER NOT NULL,
+      value       TEXT NOT NULL,
+      PRIMARY KEY (playlist_id, position)
+    );
   `);
   conn.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
