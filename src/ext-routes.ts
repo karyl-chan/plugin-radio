@@ -43,6 +43,12 @@ import {
   resolvePlaylist,
   resolveStoredPlaylist,
 } from "./resolver.js";
+import {
+  type Target,
+  joinOr409,
+  locate,
+  resolveTarget,
+} from "./voice-target.js";
 
 /** Min spacing between control calls per key — blunts a runaway loop /
  *  spammy integration. Read-only (`/status`) is exempt. */
@@ -59,21 +65,6 @@ interface AuthedKey {
   keyId: string;
   userId: string;
   scopes: ApiKeyScope[];
-}
-
-/** One voice.locate hit — where the key's user is currently sitting. */
-interface VoiceMatch {
-  guildId: string;
-  guildName?: string | null;
-  channelId: string;
-  channelName?: string | null;
-}
-
-/** Resolved playback target for a request. */
-interface Target {
-  guildId: string;
-  /** Set only when voice.locate pinned the exact channel. */
-  channelId?: string;
 }
 
 export function registerExtRoutes(
@@ -153,46 +144,6 @@ export function registerExtRoutes(
       }
     }
     return (b as Record<string, unknown>) ?? {};
-  }
-
-  /** Where is the key's user sitting right now? Returns the (possibly
-   *  empty) list of voice channels across guilds the bot shares with them.
-   *  Best-effort — a locate failure resolves to no matches. */
-  async function locate(userId: string): Promise<VoiceMatch[]> {
-    const res = (await runtime()
-      .botRpc("/api/plugin/voice.locate", { user_id: userId })
-      .catch(() => null)) as { matches?: VoiceMatch[] } | null;
-    return Array.isArray(res?.matches) ? (res as { matches: VoiceMatch[] }).matches : [];
-  }
-
-  /**
-   * Resolve which guild (and ideally channel) this request acts on.
-   * Precedence: explicit body.guildId → the user's sole current VC.
-   * Replies + returns null on failure so callers just `return`.
-   */
-  async function resolveTarget(
-    userId: string,
-    body: Record<string, unknown>,
-    reply: FastifyReply,
-  ): Promise<Target | null> {
-    const explicit = typeof body.guildId === "string" ? body.guildId.trim() : "";
-    if (explicit) return { guildId: explicit };
-    const matches = await locate(userId);
-    if (matches.length === 1) {
-      return { guildId: matches[0].guildId, channelId: matches[0].channelId };
-    }
-    if (matches.length === 0) {
-      reply.code(409).send({
-        error: "You're not in a voice channel I can see — join one first.",
-      });
-      return null;
-    }
-    reply.code(409).send({
-      error:
-        "You're in voice channels on more than one server — pass `guildId` to pick one.",
-      candidates: matches,
-    });
-    return null;
   }
 
   /** Resolve a source string to the Track(s) to enqueue (mirrors the
@@ -315,29 +266,6 @@ export function registerExtRoutes(
   );
 
   // ── Shared play/queue plumbing ──────────────────────────────────────
-  /** voice.join args: the locate-pinned channel if we have it, else let
-   *  the bot resolve the key user's current VC in this guild. */
-  function joinArgs(target: Target, userId: string) {
-    return target.channelId
-      ? { guildId: target.guildId, channelId: target.channelId }
-      : { guildId: target.guildId, userId };
-  }
-
-  /** Join voice; reply 409 + return false on failure. */
-  async function joinOr409(
-    target: Target,
-    userId: string,
-    reply: FastifyReply,
-  ): Promise<boolean> {
-    try {
-      await runtime().voice.join(joinArgs(target, userId));
-      return true;
-    } catch {
-      reply.code(409).send({ error: "Couldn't join your voice channel" });
-      return false;
-    }
-  }
-
   /** Resolve a source; reply 400 + return null on failure. */
   async function resolveSourceOr400(
     source: string,
