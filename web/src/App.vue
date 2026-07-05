@@ -132,6 +132,11 @@ const modeLabel = computed(() => {
   if (view.value === "personal") return "personal";
   return "";
 });
+
+// The identity chip links to the personal page. No ?token= needed: /me
+// accepts the current real-user token from sessionStorage (guild-scoped or
+// not), so navigating same-tab keeps the same login.
+const meUrl = computed(() => (window.__PLUGIN_BASE__ ?? "") + "/me");
 </script>
 
 <template>
@@ -139,7 +144,18 @@ const modeLabel = computed(() => {
     <header class="app-header">
       <h1>📻 Karyl Radio</h1>
       <span class="mode">{{ modeLabel }}</span>
-      <div v-if="viewer" class="viewer" :title="viewer.displayName">
+      <component
+        :is="view !== 'personal' ? 'a' : 'div'"
+        v-if="viewer"
+        class="viewer"
+        :class="{ 'viewer--link': view !== 'personal' }"
+        :href="view !== 'personal' ? meUrl : undefined"
+        :title="
+          view !== 'personal'
+            ? `${viewer.displayName} — open your personal page`
+            : viewer.displayName
+        "
+      >
         <UserAvatar
           :src="viewer.avatarUrl"
           :name="viewer.displayName"
@@ -147,7 +163,7 @@ const modeLabel = computed(() => {
           animate="hover"
         />
         <span class="viewer-name">{{ viewer.displayName }}</span>
-      </div>
+      </component>
     </header>
 
     <div v-if="view === 'loading'" class="center-msg">Connecting…</div>
@@ -176,6 +192,19 @@ const modeLabel = computed(() => {
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
+}
+.viewer--link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-pill, 999px);
+  padding: 0.15rem 0.45rem 0.15rem 0.15rem;
+  transition: background var(--transition-fast, 0.12s);
+}
+.viewer--link:hover { background: var(--bg-surface-2); }
+.viewer--link:focus-visible {
+  outline: 2px solid var(--accent, #5865f2);
+  outline-offset: 2px;
 }
 .viewer-name {
   font-size: 0.85rem;
