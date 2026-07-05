@@ -26,6 +26,7 @@ const emit = defineEmits<{
   (e: "stop"): void;
   (e: "loop", mode: "off" | "track" | "queue"): void;
   (e: "autoplay", on: boolean): void;
+  (e: "shuffle", on: boolean): void;
 }>();
 
 const cur = computed<Track | null>(() => {
@@ -107,6 +108,14 @@ function onLoop() {
       >⏹</AppButton>
       <AppButton variant="ghost" size="sm" @click="onLoop">
         {{ loopBadge(snap.loop) }}
+      </AppButton>
+      <AppButton
+        variant="ghost"
+        size="sm"
+        :title="snap.shuffle ? 'Shuffle on' : 'Shuffle off'"
+        @click="emit('shuffle', !snap.shuffle)"
+      >
+        {{ snap.shuffle ? "🔀 on" : "🔀 off" }}
       </AppButton>
       <AppButton
         variant="ghost"

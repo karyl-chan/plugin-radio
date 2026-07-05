@@ -21,6 +21,12 @@ export const en = {
     "Play a station, library track, or URL (replaces current)",
   "cmd.play.source.description":
     "Playlist name, station key, library track title/ID, or http(s) URL",
+  "cmd.play.shuffle.description":
+    "Shuffle the playlist — even the first track is random (also toggles shuffle mode)",
+  "cmd.shuffle.description": "Toggle shuffle for this session (on / off)",
+  "cmd.shuffle.mode.description": "on / off — omit to toggle",
+  "cmd.shuffle.mode.on": "on — randomize the upcoming queue",
+  "cmd.shuffle.mode.off": "off — play in order",
   "cmd.queue.description": "Add a track to the queue",
   "cmd.queue.source.description":
     "Playlist name, station key, library track title/ID, or http(s) URL",
@@ -104,6 +110,8 @@ export const en = {
   "back.nowPlaying": "⏮ Back to **{label}**.",
   "back.startFailed": "⚠ Failed to start **{label}**.",
   "loop.set": "{badge} Loop mode set to **{mode}**.",
+  "shuffle.on": "🔀 Shuffle **on** — the upcoming queue is randomized.",
+  "shuffle.off": "➡️ Shuffle **off** — playing in order.",
   "autoplay.onSingular":
     "♾️ Autoplay **on** — when the queue runs out I'll queue **{count}** YouTube recommendation (change with `/radio autoplay-count`) seeded from the last YouTube track.",
   "autoplay.onPlural":

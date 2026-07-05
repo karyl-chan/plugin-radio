@@ -17,6 +17,12 @@ export const zhTW: Record<LocaleKey, string> = {
     "播放電台、音樂庫曲目或網址 (取代目前播放)",
   "cmd.play.source.description":
     "播放清單名稱、電台代碼、曲目名稱／ID，或 http(s) 網址",
+  "cmd.play.shuffle.description":
+    "隨機播放清單 — 連第一首都隨機(同時開啟隨機模式)",
+  "cmd.shuffle.description": "切換本次工作階段的隨機播放 (on / off)",
+  "cmd.shuffle.mode.description": "on / off — 省略則切換",
+  "cmd.shuffle.mode.on": "on — 隨機化待播佇列",
+  "cmd.shuffle.mode.off": "off — 依序播放",
   "cmd.queue.description": "把曲目加進佇列",
   "cmd.queue.source.description":
     "播放清單名稱、電台代碼、曲目名稱／ID，或 http(s) 網址",
@@ -100,6 +106,8 @@ export const zhTW: Record<LocaleKey, string> = {
   "back.nowPlaying": "⏮ 已回到 **{label}**。",
   "back.startFailed": "⚠ 無法播放 **{label}**。",
   "loop.set": "{badge} 循環模式已設為 **{mode}**。",
+  "shuffle.on": "🔀 隨機播放 **開** — 待播佇列已隨機化。",
+  "shuffle.off": "➡️ 隨機播放 **關** — 依序播放。",
   "autoplay.onSingular":
     "♾️ 自動播放 **開啟** — 佇列播完時我會從最後一首 YouTube 曲目衍生 **{count}** 首推薦並排入 (可用 `/radio autoplay-count` 調整)。",
   "autoplay.onPlural":

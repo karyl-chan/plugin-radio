@@ -27,6 +27,9 @@ import {
   setAutoplay,
   setAutoplayFetchCount,
   setLoop,
+  setShuffle,
+  shuffleTracks,
+  shuffleUpcoming,
 } from "./queue.js";
 import { withGuildLock } from "./guild-lock.js";
 import {
@@ -275,6 +278,9 @@ async function playBulk(
   tracks: Track[],
 ): Promise<Track | null> {
   resetQueue(guildId);
+  // Shuffle the whole set before enqueue when shuffle is on, so even the
+  // first track that starts is random (resetQueue keeps the shuffle flag).
+  if (getState(guildId)?.shuffle) shuffleTracks(tracks);
   for (const t of tracks) enqueue(guildId, t);
   let started: Track | null = null;
   for (let i = 0; i < 5 && !started; i++) {
@@ -553,6 +559,10 @@ export default function buildPlugin() {
                     { type: "string", name: "source", required: true },
                     "cmd.play.source.description",
                   ),
+                  localizedOption(
+                    { type: "boolean", name: "shuffle", required: false },
+                    "cmd.play.shuffle.description",
+                  ),
                 ],
               } as CommandOption,
               {
@@ -622,6 +632,24 @@ export default function buildPlugin() {
                     { type: "integer", name: "count", required: false },
                     "cmd.autoplayCount.count.description",
                   ),
+                ],
+              } as CommandOption,
+              {
+                ...localizedOption(
+                  { type: "sub_command", name: "shuffle" },
+                  "cmd.shuffle.description",
+                ),
+                options: [
+                  {
+                    ...localizedOption(
+                      { type: "string", name: "mode", required: false },
+                      "cmd.shuffle.mode.description",
+                    ),
+                    choices: [
+                      localizedChoice("on", "cmd.shuffle.mode.on"),
+                      localizedChoice("off", "cmd.shuffle.mode.off"),
+                    ],
+                  } as CommandOption,
                 ],
               } as CommandOption,
               localizedOption(
@@ -738,6 +766,32 @@ export default function buildPlugin() {
                         badge: loopBadge(mode),
                         mode,
                       }),
+                    });
+                  }
+
+                  case "shuffle": {
+                    // `mode` optional: on / off set explicitly, omitted =
+                    // toggle the current state.
+                    const modeOpt =
+                      typeof ctx.options.mode === "string"
+                        ? ctx.options.mode
+                        : undefined;
+                    const cur = getState(guildId)?.shuffle ?? false;
+                    const on =
+                      modeOpt === "on"
+                        ? true
+                        : modeOpt === "off"
+                          ? false
+                          : !cur;
+                    setShuffle(guildId, on);
+                    // Take effect on the live queue: shuffle the upcoming
+                    // tracks when turning on.
+                    if (on) shuffleUpcoming(guildId);
+                    await syncNowPlaying(guildId);
+                    return playbackReply(ctx, guildId, locale, {
+                      description: on
+                        ? t(locale, "shuffle.on")
+                        : t(locale, "shuffle.off"),
                     });
                   }
 
@@ -958,6 +1012,13 @@ export default function buildPlugin() {
                     // on; any other source turns it off (a fresh play resets it).
                     const autoOn = isYouTubeUrlWithList(source);
                     setAutoplay(guildId, autoOn);
+                    // Optional `shuffle:` on /radio play sets the session
+                    // shuffle mode (persists like autoplay); playBulk then
+                    // randomizes the tracks so even the first is random.
+                    const shuffleOpt = ctx.options.shuffle;
+                    if (typeof shuffleOpt === "boolean") {
+                      setShuffle(guildId, shuffleOpt);
+                    }
                     const autoNote = autoOn ? t(locale, "autoplay.notice.on") : "";
                     const joinFirst = async (): Promise<string | null> => {
                       try {

@@ -156,6 +156,8 @@ export interface SessionSnapshot {
   loop: LoopMode;
   autoplay: boolean;
   autoplayFetchCount: number;
+  /** When on, playback order is randomized. */
+  shuffle: boolean;
   /** Full ordered playlist. Partition around `cursorQid` to render
    *  played / current / upcoming. */
   playlist: Track[];

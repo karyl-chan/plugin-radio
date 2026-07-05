@@ -17,6 +17,12 @@ export const zhCN: Record<LocaleKey, string> = {
     "播放电台、音乐库曲目或链接 (替换当前播放)",
   "cmd.play.source.description":
     "播放列表名称、电台代码、曲目名称／ID，或 http(s) 链接",
+  "cmd.play.shuffle.description":
+    "随机播放列表 — 连第一首都随机(同时开启随机模式)",
+  "cmd.shuffle.description": "切换本次会话的随机播放 (on / off)",
+  "cmd.shuffle.mode.description": "on / off — 省略则切换",
+  "cmd.shuffle.mode.on": "on — 随机化待播队列",
+  "cmd.shuffle.mode.off": "off — 按顺序播放",
   "cmd.queue.description": "把曲目加入队列",
   "cmd.queue.source.description":
     "播放列表名称、电台代码、曲目名称／ID，或 http(s) 链接",
@@ -100,6 +106,8 @@ export const zhCN: Record<LocaleKey, string> = {
   "back.nowPlaying": "⏮ 已回到 **{label}**。",
   "back.startFailed": "⚠ 无法播放 **{label}**。",
   "loop.set": "{badge} 循环模式已设为 **{mode}**。",
+  "shuffle.on": "🔀 随机播放 **开** — 待播队列已随机化。",
+  "shuffle.off": "➡️ 随机播放 **关** — 按顺序播放。",
   "autoplay.onSingular":
     "♾️ 自动播放 **开启** — 队列播完时我会从最后一首 YouTube 曲目衍生 **{count}** 首推荐并排入 (可用 `/radio autoplay-count` 调整)。",
   "autoplay.onPlural":

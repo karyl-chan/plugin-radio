@@ -150,6 +150,9 @@ function setLoop(mode: LoopMode) {
 function setAutoplay(on: boolean) {
   act("POST", sessionPath("/autoplay"), { on });
 }
+function setShuffle(on: boolean) {
+  act("POST", sessionPath("/shuffle"), { on });
+}
 
 // ── dequeue (batched + optimistic — see PlaylistList ✕ click) ─────
 let removeBatch: number[] = [];
@@ -224,6 +227,7 @@ onUnmounted(() => {
       @stop="act('POST', sessionPath('/stop'))"
       @loop="setLoop"
       @autoplay="setAutoplay"
+      @shuffle="setShuffle"
     />
 
     <div class="card">

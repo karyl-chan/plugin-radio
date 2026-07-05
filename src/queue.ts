@@ -100,6 +100,10 @@ export interface GuildState {
   autoplaySeededFrom: string | null;
   /** How many recommendations the autoplay refill appends per fire. */
   autoplayFetchCount: number;
+  /** When on, a multi-track `play` enqueues its tracks in randomized
+   *  order (so even the first track is random), and toggling it on
+   *  mid-session shuffles the upcoming queue. */
+  shuffle: boolean;
   /**
    * The session has been exhausted — peekNext returned null after a
    * track ended or the user clicked /next past the last track, and the
@@ -151,6 +155,7 @@ function ensure(guildId: string): GuildState {
       autoplay: false,
       autoplaySeededFrom: null,
       autoplayFetchCount: DEFAULT_AUTOPLAY_FETCH_COUNT,
+      shuffle: false,
       done: false,
     };
     states.set(guildId, s);
@@ -320,6 +325,33 @@ export function removeTrackAt(guildId: string, idx: number): Track | null {
 
 export function setLoop(guildId: string, mode: LoopMode): void {
   ensure(guildId).loop = mode;
+}
+
+export function setShuffle(guildId: string, on: boolean): void {
+  ensure(guildId).shuffle = on;
+}
+
+/** Fisher-Yates shuffle a Track[] in place, returning it. Used to randomize
+ *  a multi-track `play` before enqueue so even the first track is random. */
+export function shuffleTracks(tracks: Track[]): Track[] {
+  for (let i = tracks.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
+  }
+  return tracks;
+}
+
+/** Randomize the order of the UPCOMING tracks (everything after the cursor)
+ *  in place — for when shuffle is toggled on mid-session. The current and
+ *  already-played tracks keep their positions. */
+export function shuffleUpcoming(guildId: string): void {
+  const s = ensure(guildId);
+  bumpEpoch(guildId);
+  const start = s.cursor + 1;
+  for (let i = s.tracks.length - 1; i > start; i--) {
+    const j = start + Math.floor(Math.random() * (i - start + 1));
+    [s.tracks[i], s.tracks[j]] = [s.tracks[j], s.tracks[i]];
+  }
 }
 
 export function setAutoplay(guildId: string, on: boolean): void {

@@ -57,6 +57,8 @@ import {
   reorderByQid,
   setAutoplay,
   setLoop,
+  setShuffle,
+  shuffleUpcoming,
 } from "./queue.js";
 import {
   doJump,
@@ -212,6 +214,7 @@ async function sessionSnapshot(
     loop: s?.loop ?? "off",
     autoplay: s?.autoplay ?? false,
     autoplayFetchCount: s?.autoplayFetchCount ?? DEFAULT_AUTOPLAY_FETCH_COUNT,
+    shuffle: s?.shuffle ?? false,
     // The full ordered playlist + the qid of the cursor's track. The
     // FE renders played / current / upcoming by partitioning this list
     // around cursorQid — no separate queue / played arrays needed.
@@ -1013,6 +1016,32 @@ export async function registerWebRoutes(
       return withGuildLock(guildId, async () => {
         keepAdvancing(guildId);
         setAutoplay(guildId, on);
+        return syncAndSnapshot(guildId);
+      });
+    },
+  );
+
+  // 🔀 Shuffle toggle. `on` optional — omitted flips the current state.
+  // Turning on shuffles the upcoming queue so it takes effect immediately.
+  server.post<{ Params: { guildId: string } }>(
+    "/api/session/:guildId/shuffle",
+    async (request, reply) => {
+      const { guildId } = request.params;
+      if (!authSession(request, reply, guildId)) return;
+      let body: { on?: unknown };
+      try {
+        body =
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body as { on?: unknown });
+      } catch {
+        return reply.code(400).send({ error: "Invalid JSON" });
+      }
+      return withGuildLock(guildId, async () => {
+        const cur = getState(guildId)?.shuffle ?? false;
+        const on = typeof body?.on === "boolean" ? body.on : !cur;
+        setShuffle(guildId, on);
+        if (on) shuffleUpcoming(guildId);
         return syncAndSnapshot(guildId);
       });
     },
