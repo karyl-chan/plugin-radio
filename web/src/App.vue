@@ -145,6 +145,7 @@ const modeLabel = computed(() => {
           :src="viewer.avatarUrl"
           :name="viewer.displayName"
           :size="26"
+          animate="hover"
         />
         <span class="viewer-name">{{ viewer.displayName }}</span>
       </div>
