@@ -7,8 +7,9 @@ import EditTrackModal from "../components/EditTrackModal.vue";
 import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import { api, apiUpload } from "../api";
 import { useToast } from "../composables/use-toast";
+import { useApiKeys } from "../composables/use-api-keys";
 import { fmtDur, fmtSize } from "../composables/use-format";
-import type { ApiKey, LibraryTrack, Playlist } from "../types";
+import type { LibraryTrack, Playlist } from "../types";
 
 const { ok, error } = useToast();
 
@@ -55,13 +56,18 @@ const playlistEditingTarget = computed<Playlist | null>(() =>
     : playlistEditing.value,
 );
 
-// API keys tab. `freshKey` holds the one-time plaintext returned by a
-// create call — shown in a reveal banner until the manager dismisses it,
-// since it's unrecoverable afterwards.
-const apiKeys = ref<ApiKey[]>([]);
-const newKeyLabel = ref("");
-const creatingKey = ref(false);
-const freshKey = ref<string | null>(null);
+// API keys tab — shared self-service key CRUD (see use-api-keys).
+const {
+  apiKeys,
+  newKeyLabel,
+  creatingKey,
+  freshKey,
+  loadKeys,
+  createKey,
+  revokeKey,
+  copyFreshKey,
+  keySubText,
+} = useApiKeys("/api/keys");
 
 async function load() {
   try {
@@ -192,62 +198,6 @@ function subText(t: LibraryTrack): string {
   return [t.author, t.album, fmtDur(t.duration), fmtSize(t.sizeBytes)]
     .filter(Boolean)
     .join(" · ");
-}
-
-// ── API keys ────────────────────────────────────────────────────────
-async function loadKeys(): Promise<void> {
-  try {
-    const r = await api<{ keys: ApiKey[] }>("GET", "/api/keys");
-    apiKeys.value = r.keys || [];
-  } catch (e: any) {
-    error(e.message);
-  }
-}
-
-async function createKey(): Promise<void> {
-  creatingKey.value = true;
-  try {
-    const r = await api<{ key: ApiKey; plaintext: string }>("POST", "/api/keys", {
-      label: newKeyLabel.value.trim() || undefined,
-    });
-    freshKey.value = r.plaintext;
-    newKeyLabel.value = "";
-    ok("API key created — copy it now");
-    await loadKeys();
-  } catch (e: any) {
-    error(e.message);
-  } finally {
-    creatingKey.value = false;
-  }
-}
-
-async function revokeKey(k: ApiKey): Promise<void> {
-  if (!confirm(`Revoke API key "${k.label || k.id}"? Integrations using it stop working.`))
-    return;
-  try {
-    await api("DELETE", "/api/keys/" + encodeURIComponent(k.id));
-    ok("Revoked");
-    await loadKeys();
-  } catch (e: any) {
-    error(e.message);
-  }
-}
-
-async function copyFreshKey(): Promise<void> {
-  if (!freshKey.value) return;
-  try {
-    await navigator.clipboard.writeText(freshKey.value);
-    ok("Copied to clipboard");
-  } catch {
-    error("Couldn't copy — select and copy manually");
-  }
-}
-
-function keySubText(k: ApiKey): string {
-  const used = k.lastUsedAt
-    ? `last used ${new Date(k.lastUsedAt).toLocaleString()}`
-    : "never used";
-  return `${k.scopes.join(", ")} · ${used}`;
 }
 
 onMounted(() => {

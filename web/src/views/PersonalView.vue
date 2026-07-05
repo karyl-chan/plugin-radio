@@ -4,7 +4,8 @@ import { AppButton, AppTabs, type TabDef } from "@karyl-chan/ui";
 import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
-import type { ApiKey, UserPlaylist, VoiceMatch } from "../types";
+import { useApiKeys } from "../composables/use-api-keys";
+import type { UserPlaylist, VoiceMatch } from "../types";
 
 const { ok, error } = useToast();
 
@@ -128,70 +129,18 @@ function entryCountText(n: number): string {
   return n === 1 ? "1 entry" : `${n} entries`;
 }
 
-// ── API keys (self-service) ────────────────────────────────────────
-const apiKeys = ref<ApiKey[]>([]);
-const newKeyLabel = ref("");
-const creatingKey = ref(false);
-const freshKey = ref<string | null>(null);
-
-async function loadKeys(): Promise<void> {
-  try {
-    const r = await api<{ keys: ApiKey[] }>("GET", "/api/me/keys");
-    apiKeys.value = r.keys || [];
-  } catch (e: any) {
-    error(e.message);
-  }
-}
-
-async function createKey(): Promise<void> {
-  creatingKey.value = true;
-  try {
-    const r = await api<{ key: ApiKey; plaintext: string }>(
-      "POST",
-      "/api/me/keys",
-      { label: newKeyLabel.value.trim() || undefined },
-    );
-    freshKey.value = r.plaintext;
-    newKeyLabel.value = "";
-    ok("API key created — copy it now");
-    await loadKeys();
-  } catch (e: any) {
-    error(e.message);
-  } finally {
-    creatingKey.value = false;
-  }
-}
-
-async function revokeKey(k: ApiKey): Promise<void> {
-  if (
-    !confirm(`Revoke API key "${k.label || k.id}"? Integrations using it stop working.`)
-  )
-    return;
-  try {
-    await api("DELETE", "/api/me/keys/" + encodeURIComponent(k.id));
-    ok("Revoked");
-    await loadKeys();
-  } catch (e: any) {
-    error(e.message);
-  }
-}
-
-async function copyFreshKey(): Promise<void> {
-  if (!freshKey.value) return;
-  try {
-    await navigator.clipboard.writeText(freshKey.value);
-    ok("Copied to clipboard");
-  } catch {
-    error("Couldn't copy — select and copy manually");
-  }
-}
-
-function keySubText(k: ApiKey): string {
-  const used = k.lastUsedAt
-    ? `last used ${new Date(k.lastUsedAt).toLocaleString()}`
-    : "never used";
-  return `${k.scopes.join(", ")} · ${used}`;
-}
+// ── API keys (self-service) — shared CRUD (see use-api-keys) ────────
+const {
+  apiKeys,
+  newKeyLabel,
+  creatingKey,
+  freshKey,
+  loadKeys,
+  createKey,
+  revokeKey,
+  copyFreshKey,
+  keySubText,
+} = useApiKeys("/api/me/keys");
 
 onMounted(() => {
   loadPlaylists();
@@ -369,6 +318,8 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
+/* The list-row + fresh-key + intro styles below mirror ManageView's scoped
+   styles (Vue scoped CSS can't be shared) — keep the two in sync. */
 .intro code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--bg-surface-2);

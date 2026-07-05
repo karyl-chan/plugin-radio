@@ -249,7 +249,9 @@ export function registerPersonalRoutes(
     const me = authPersonal(request, reply);
     if (!me) return;
     const body = parseBody(request);
-    const label = typeof body.label === "string" ? body.label : null;
+    // Cap the label at the route layer (issueKey trims but doesn't bound
+    // length) — same as the manage keys route in web-routes.ts.
+    const label = typeof body.label === "string" ? body.label.slice(0, 100) : null;
     const scopes = normalizeScopes(body.scopes);
     const { record, plaintext } = issueKey({ userId: me.userId, label, scopes });
     return { key: record, plaintext };

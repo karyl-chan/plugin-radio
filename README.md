@@ -19,6 +19,7 @@ and the advance loop, so it keeps its own package and docker service.
 | `stop` | Stop, clear the queue, leave voice |
 | `np` / `queuelist` | Now-playing card (the embed + control buttons below; ephemeral, not auto-updated) / show the queue |
 | `stations` | List the built-in radio stations |
+| `me` | Get a private link to your **personal page** — manage your own playlists and external-control API keys, and start a playlist in whatever voice channel you're in. Available to any member (no capability needed); each user only ever sees their own data. See [Personal page](#personal-page). |
 | `manage` | Get a private link to the admin WebUI (requires the `plugin:karyl-radio:manage` capability — bot owners/admins exempt). The manage WebUI is the only way to put audio into the library: managers upload audio files they own. |
 
 `source` for `play`/`queue` auto-resolves a station key, a library track
@@ -101,6 +102,30 @@ component-dispatch path (`kc:karyl-radio:<action>` custom ids); see the
 bot's `docs/development/plugin-guide.md`. `/radio np` returns the same
 embed + buttons template, ephemeral — but it isn't auto-updated; only its
 own buttons edit it.
+
+## Personal page
+
+`/radio me` hands any member a private, ephemeral link to their own
+**personal page** (served at `<base>/me`) — no `manage` capability
+required. There they can:
+
+- **Curate personal playlists** — named lists of the same "source"
+  strings `/radio play` accepts (station keys, http(s) URLs, track
+  titles). They're private per user (two members can both have a
+  "favourites"), and separate from the shared, manager-owned
+  playlists. Personal playlists can't browse the private library — only
+  public sources are pasteable — but a bare title still resolves against
+  the library at play time.
+- **Play a playlist where they are** — the page polls where the member is
+  currently sitting in voice and the **Play** button starts the list
+  there (the same "play wherever I am" resolution the API-key channel
+  uses; if they're in voice on more than one server, they pick which).
+- **Manage their own API keys** — the self-service half of the
+  external-control keys (`/api/ext/*`), scoped to that user.
+
+The link carries a **guildless** session JWT (minted with no `guild_id`),
+so every `/api/me/*` route is authorized purely by the member's identity;
+the token is private — treat it like a password.
 
 ## WebUI
 
