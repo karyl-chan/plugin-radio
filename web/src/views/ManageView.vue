@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { AppButton, AppTabs, type TabDef } from "@karyl-chan/ui";
+import { AppButton, AppTabs, Stack, type TabDef } from "@karyl-chan/ui";
 import Thumb from "../components/Thumb.vue";
 import TrackLink from "../components/TrackLink.vue";
 import EditTrackModal from "../components/EditTrackModal.vue";
@@ -208,10 +208,10 @@ onMounted(() => {
 </script>
 
 <template>
+  <Stack gap="4">
   <AppTabs
     :model-value="activeTab"
     :tabs="tabs"
-    class="manage-tabs"
     @update:model-value="pickTab"
   />
 
@@ -382,6 +382,7 @@ onMounted(() => {
       </ul>
     </section>
   </template>
+  </Stack>
 
   <EditTrackModal
     :track="editing"
@@ -400,15 +401,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* AppTabs' scoped CSS sets `flex: 1` on its root so it fills a flex
-   parent (the bot frontend pattern where the tab strip IS the page).
-   ManageView uses it as a header strip above other content, so undo
-   the flex grow — otherwise it consumes the remaining vertical space
-   in `.app-wrap` and shoves the tracks / playlists lists to the bottom. */
-.manage-tabs {
-  flex: 0 0 auto;
-  margin-bottom: 0.85rem;
-}
+/* Vertical rhythm is owned by the <Stack gap="4"> wrapper. Neutralize the
+   global .section / .card + .card margins so they don't double the gap. */
+.section { margin-top: 0; }
+.card + .card { margin-top: 0; }
 
 .intro code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

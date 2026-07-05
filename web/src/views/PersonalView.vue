@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { AppButton, AppTabs, type TabDef } from "@karyl-chan/ui";
+import { AppButton, AppTabs, Stack, type TabDef } from "@karyl-chan/ui";
 import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
@@ -154,6 +154,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <Stack gap="4">
   <div class="card voice-card">
     <div class="voice-status">
       <span
@@ -176,7 +177,6 @@ onBeforeUnmount(() => {
   <AppTabs
     :model-value="activeTab"
     :tabs="tabs"
-    class="personal-tabs"
     @update:model-value="pickTab"
   />
 
@@ -274,6 +274,7 @@ onBeforeUnmount(() => {
       </ul>
     </section>
   </template>
+  </Stack>
 
   <EditPlaylistModal
     :playlist="playlistEditingTarget"
@@ -285,12 +286,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* Undo AppTabs' `flex: 1` root — it's a header strip here, not the page
-   (same reason as ManageView). */
-.personal-tabs {
-  flex: 0 0 auto;
-  margin-bottom: 0.85rem;
-}
+/* Vertical rhythm is owned by the <Stack gap="4"> wrapper. Neutralize the
+   global .section top margin so it doesn't double up on the stack gap. */
+.section { margin-top: 0; }
 
 .voice-card {
   display: flex;
