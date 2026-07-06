@@ -7,6 +7,7 @@ import Thumb from "../components/Thumb.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
 import { useFavorites } from "../composables/use-favorites";
+import { useBusy } from "../composables/use-busy";
 import { trackKey } from "../composables/use-format";
 import type { LoopMode, SessionSnapshot, Track, UserFavorite } from "../types";
 
@@ -34,6 +35,15 @@ const pendingAdds = ref<string[]>([]);
 const addText = ref("");
 const showSuggestions = ref(false);
 const savingPlaylist = ref(false);
+const adding = ref(false);
+
+// Per-button transition state (press → API response). `controlBusy` keys the
+// NowPlayingCard buttons (prev/pause/…); `favToggleBusy` keys the ☆ toggles
+// by source; `jumpingQid` is the row whose /jump is in flight. Destructured
+// so the busy sets are top-level refs (auto-unwrapped in the template).
+const { busyKeys: controlBusy, run: runControl } = useBusy();
+const { busyKeys: favToggleBusy, run: runFavToggle } = useBusy();
+const jumpingQid = ref<number | null>(null);
 
 const pendingRemoveQids = ref<Set<number>>(new Set());
 
@@ -61,12 +71,21 @@ async function refresh() {
   }
 }
 
-async function act(method: string, path: string, body?: unknown) {
-  try {
-    snap.value = await api<SessionSnapshot>(method, path, body);
-  } catch (e: any) {
-    error(e.message);
-  }
+async function act(
+  method: string,
+  path: string,
+  body?: unknown,
+  busyKey?: string,
+) {
+  const call = async () => {
+    try {
+      snap.value = await api<SessionSnapshot>(method, path, body);
+    } catch (e: any) {
+      error(e.message);
+    }
+  };
+  if (busyKey) await runControl(busyKey, call);
+  else await call();
 }
 
 async function addSource(raw: string): Promise<void> {
@@ -75,6 +94,7 @@ async function addSource(raw: string): Promise<void> {
   addText.value = "";
   showSuggestions.value = false;
   pendingAdds.value.push(v);
+  adding.value = true;
   try {
     snap.value = await api<SessionSnapshot>(
       "POST",
@@ -87,6 +107,9 @@ async function addSource(raw: string): Promise<void> {
   } finally {
     const i = pendingAdds.value.indexOf(v);
     if (i !== -1) pendingAdds.value.splice(i, 1);
+    // Keep the button spinning only while an add is genuinely in flight
+    // (a second add can overlap the first via the autocomplete).
+    if (pendingAdds.value.length === 0) adding.value = false;
   }
 }
 function add(): void {
@@ -119,7 +142,11 @@ function hideSuggestionsSoon(): void {
 function onToggleFavorite(t: Track): void {
   const source = trackKey(t);
   if (!source) return;
-  void toggleFavoriteSource(source, t.label, t.coverUrl);
+  // The ☆ only flips once the server confirms membership, so mark the row
+  // busy for the round-trip (drives the pulsing pending star).
+  void runFavToggle(source, () =>
+    toggleFavoriteSource(source, t.label, t.coverUrl),
+  );
 }
 
 // ── save the current queue as a personal playlist ───────────────────
@@ -158,13 +185,13 @@ async function saveAsPlaylist(): Promise<void> {
 }
 
 function setLoop(mode: LoopMode) {
-  act("POST", sessionPath("/loop"), { mode });
+  act("POST", sessionPath("/loop"), { mode }, "loop");
 }
 function setAutoplay(on: boolean) {
-  act("POST", sessionPath("/autoplay"), { on });
+  act("POST", sessionPath("/autoplay"), { on }, "autoplay");
 }
 function setShuffle(on: boolean) {
-  act("POST", sessionPath("/shuffle"), { on });
+  act("POST", sessionPath("/shuffle"), { on }, "shuffle");
 }
 
 // ── dequeue (batched + optimistic — see PlaylistList ✕ click) ─────
@@ -203,7 +230,12 @@ async function flushDequeue(): Promise<void> {
 
 // ── jump (click any played or upcoming track) ───────────────────
 async function jumpTo(qid: number): Promise<void> {
-  await act("POST", sessionPath("/jump"), { qid });
+  jumpingQid.value = qid;
+  try {
+    await act("POST", sessionPath("/jump"), { qid });
+  } finally {
+    if (jumpingQid.value === qid) jumpingQid.value = null;
+  }
 }
 
 // ── reorder (drag handle) ───────────────────────────────────────
@@ -234,10 +266,11 @@ onUnmounted(() => {
     <NowPlayingCard
       :snap="snap"
       :current="currentTrack"
-      @prev="act('POST', sessionPath('/prev'))"
-      @pause="(paused: boolean) => act('POST', sessionPath('/pause'), { paused })"
-      @next="act('POST', sessionPath('/next'))"
-      @stop="act('POST', sessionPath('/stop'))"
+      :busy="controlBusy"
+      @prev="act('POST', sessionPath('/prev'), undefined, 'prev')"
+      @pause="(paused: boolean) => act('POST', sessionPath('/pause'), { paused }, 'pause')"
+      @next="act('POST', sessionPath('/next'), undefined, 'next')"
+      @stop="act('POST', sessionPath('/stop'), undefined, 'stop')"
       @loop="setLoop"
       @autoplay="setAutoplay"
       @shuffle="setShuffle"
@@ -269,7 +302,7 @@ onUnmounted(() => {
             </li>
           </ul>
         </div>
-        <AppButton type="submit">+ Add</AppButton>
+        <AppButton type="submit" :loading="adding">+ Add</AppButton>
       </form>
     </div>
 
@@ -292,6 +325,8 @@ onUnmounted(() => {
         :pending-adds="pendingAdds"
         :can-favorite="!!loggedIn"
         :favorite-sources="favoriteSources"
+        :busy-jump-qid="jumpingQid"
+        :busy-fav-keys="favToggleBusy"
         @dequeue="scheduleDequeue"
         @jump="jumpTo"
         @reorder="reorder"

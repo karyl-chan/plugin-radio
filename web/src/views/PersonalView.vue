@@ -101,6 +101,7 @@ const playlistEditingTarget = computed<UserPlaylist | null>(() =>
     : playlistEditing.value,
 );
 const playingId = ref<string | null>(null);
+const deletingId = ref<string | null>(null);
 
 async function loadPlaylists(): Promise<void> {
   try {
@@ -126,12 +127,15 @@ function closePlaylistEdit(): void {
 
 async function removePlaylist(p: UserPlaylist): Promise<void> {
   if (!confirm(`Delete playlist "${p.name}"?`)) return;
+  deletingId.value = p.id;
   try {
     await api("DELETE", "/api/me/playlists/" + encodeURIComponent(p.id));
     ok("Playlist deleted");
-    loadPlaylists();
+    await loadPlaylists();
   } catch (e: any) {
     error(e.message);
+  } finally {
+    deletingId.value = null;
   }
 }
 
@@ -163,6 +167,7 @@ const {
   apiKeys,
   newKeyLabel,
   creatingKey,
+  revokingKeyIds,
   freshKey,
   loadKeys,
   createKey,
@@ -174,6 +179,7 @@ const {
 // ── favorites ───────────────────────────────────────────────────────
 const { favorites, load: loadFavorites, remove: removeFavorite } = useFavorites();
 const queueingFavId = ref<string | null>(null);
+const removingFavId = ref<string | null>(null);
 
 async function queueFavorite(f: UserFavorite): Promise<void> {
   const guildId = selectedGuildId.value;
@@ -196,7 +202,12 @@ async function queueFavorite(f: UserFavorite): Promise<void> {
 
 async function removeFav(f: UserFavorite): Promise<void> {
   if (!confirm(`Remove "${f.label}" from favorites?`)) return;
-  await removeFavorite(f.id);
+  removingFavId.value = f.id;
+  try {
+    await removeFavorite(f.id);
+  } finally {
+    removingFavId.value = null;
+  }
 }
 
 // "Open player" navigates away with openingPlayer=true. The browser freezes
@@ -239,7 +250,7 @@ onBeforeUnmount(() => {
         class="voice-open"
         :disabled="openingPlayer"
         @click="openPlayer"
-      >Open player →</button>
+      >{{ openingPlayer ? "Opening…" : "Open player →" }}</button>
     </div>
     <select
       v-if="voiceMatches.length > 1"
@@ -291,7 +302,13 @@ onBeforeUnmount(() => {
             <AppButton variant="ghost" size="sm" @click="openEditPlaylist(p)">
               ✎ Edit
             </AppButton>
-            <AppButton variant="danger" size="sm" @click="removePlaylist(p)">
+            <AppButton
+              variant="danger"
+              size="sm"
+              :loading="deletingId === p.id"
+              :disabled="deletingId === p.id"
+              @click="removePlaylist(p)"
+            >
               🗑
             </AppButton>
           </div>
@@ -329,7 +346,13 @@ onBeforeUnmount(() => {
               :disabled="!canPlay"
               @click="queueFavorite(f)"
             >+ Queue</AppButton>
-            <AppButton variant="danger" size="sm" @click="removeFav(f)">
+            <AppButton
+              variant="danger"
+              size="sm"
+              :loading="removingFavId === f.id"
+              :disabled="removingFavId === f.id"
+              @click="removeFav(f)"
+            >
               🗑
             </AppButton>
           </div>
@@ -382,7 +405,13 @@ onBeforeUnmount(() => {
             <div class="dim">{{ keySubText(k) }}</div>
           </div>
           <div class="actions">
-            <AppButton variant="danger" size="sm" @click="revokeKey(k)">
+            <AppButton
+              variant="danger"
+              size="sm"
+              :loading="revokingKeyIds.has(k.id)"
+              :disabled="revokingKeyIds.has(k.id)"
+              @click="revokeKey(k)"
+            >
               Revoke
             </AppButton>
           </div>

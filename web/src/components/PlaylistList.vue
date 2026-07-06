@@ -31,10 +31,17 @@ const props = withDefaults(
     /** The set of favorited source keys (`trackId ?? sourceUrl`) — drives
      *  the filled/empty ☆. */
     favoriteSources?: Set<string>;
+    /** qid whose /jump call is in flight — spins that row's play affordance. */
+    busyJumpQid?: number | null;
+    /** source keys whose ☆ toggle is in flight — the toggle only flips once
+     *  the server confirms, so the row shows a pending spinner until then. */
+    busyFavKeys?: Set<string>;
   }>(),
   {
     canFavorite: false,
     favoriteSources: () => new Set<string>(),
+    busyJumpQid: null,
+    busyFavKeys: () => new Set<string>(),
   },
 );
 
@@ -48,6 +55,13 @@ const emit = defineEmits<{
 function isFav(t: Track): boolean {
   const k = trackKey(t);
   return !!k && props.favoriteSources.has(k);
+}
+
+/** True while this row's ☆ toggle request is in flight (the star only flips
+ *  once the server confirms membership). */
+function isFavBusy(t: Track): boolean {
+  const k = trackKey(t);
+  return !!k && props.busyFavKeys.has(k);
 }
 
 /** Visible rows = playlist minus optimistically-removed qids; each row
@@ -174,10 +188,17 @@ watch(
         v-else
         type="button"
         class="idx idx--jump"
-        title="Play this track"
+        :class="{ 'idx--busy': busyJumpQid === t.qid }"
+        :title="busyJumpQid === t.qid ? 'Starting…' : 'Play this track'"
+        :disabled="busyJumpQid === t.qid"
         @click.stop="emit('jump', t.qid)"
       >
-        <span class="idx-num">{{ i + 1 }}</span>
+        <span
+          v-if="busyJumpQid === t.qid"
+          class="idx-spin"
+          aria-label="Starting"
+        />
+        <span v-else class="idx-num">{{ i + 1 }}</span>
       </button>
 
       <Thumb :src="t.coverUrl" />
@@ -194,8 +215,9 @@ watch(
           v-if="canFavorite && trackKey(t)"
           type="button"
           class="row-action star"
-          :class="{ 'star--on': isFav(t) }"
+          :class="{ 'star--on': isFav(t), 'star--busy': isFavBusy(t) }"
           :title="isFav(t) ? 'Remove from favorites' : 'Add to favorites'"
+          :disabled="isFavBusy(t)"
           @click.stop="emit('toggleFavorite', t)"
         >{{ isFav(t) ? "★" : "☆" }}</button>
         <AppButton
@@ -311,6 +333,26 @@ watch(
   display: inline-block;
   transition: opacity var(--transition-fast);
 }
+/* Jump in flight: swap the number/▶ for a small spinner, and suppress the
+   hover ▶ so it doesn't bleed through. */
+.idx--jump.idx--busy { cursor: default; }
+.idx--busy::before { content: none; }
+.idx-spin {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid var(--text-faint);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  vertical-align: -0.1em;
+  animation: idx-spin 0.6s linear infinite;
+}
+@keyframes idx-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .idx-spin { animation-duration: 1.4s; }
+}
 .track-item:hover .idx--jump .idx-num,
 .idx--jump:focus-visible .idx-num {
   opacity: 0;
@@ -364,6 +406,20 @@ watch(
 .star.star--on {
   opacity: 1;
   color: var(--accent);
+}
+/* Toggle in flight: force the star visible (the pointer may have left the
+   row) and pulse it so the pending state reads even mid-hover-hide. */
+.star.star--busy {
+  opacity: 1;
+  color: var(--accent);
+  cursor: default;
+  animation: star-pulse 0.8s ease-in-out infinite;
+}
+@keyframes star-pulse {
+  50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .star.star--busy { animation: none; opacity: 0.7; }
 }
 
 /* drag */

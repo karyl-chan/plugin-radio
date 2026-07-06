@@ -11,13 +11,20 @@ import {
   trackMeta,
 } from "../composables/use-format";
 
-const props = defineProps<{
-  snap: SessionSnapshot;
-  /** Optional override for the current track (SessionView pre-computes
-   *  it once for cheaper rendering). When omitted we derive from the
-   *  snapshot's playlist + cursorQid. */
-  current?: Track | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    snap: SessionSnapshot;
+    /** Optional override for the current track (SessionView pre-computes
+     *  it once for cheaper rendering). When omitted we derive from the
+     *  snapshot's playlist + cursorQid. */
+    current?: Track | null;
+    /** Control keys whose API call is in flight (parent-owned, since the
+     *  parent does the request) — drives the per-button spinner. Keys:
+     *  prev / pause / next / stop / loop / shuffle / autoplay. */
+    busy?: Set<string>;
+  }>(),
+  { busy: () => new Set<string>() },
+);
 
 const emit = defineEmits<{
   (e: "prev"): void;
@@ -91,28 +98,43 @@ function onLoop() {
         size="md"
         title="Previous"
         :disabled="!hasPrev"
+        :loading="busy.has('prev')"
         @click="emit('prev')"
       >⏮</AppButton>
       <AppButton
         variant="ghost"
         size="md"
         :title="snap.paused ? 'Resume' : 'Pause'"
+        :loading="busy.has('pause')"
         @click="emit('pause', !snap.paused)"
       >{{ snap.paused ? "▶" : "⏸" }}</AppButton>
-      <AppButton variant="ghost" size="md" title="Next" @click="emit('next')">⏭</AppButton>
+      <AppButton
+        variant="ghost"
+        size="md"
+        title="Next"
+        :loading="busy.has('next')"
+        @click="emit('next')"
+      >⏭</AppButton>
       <AppButton
         variant="danger"
         size="md"
         title="Stop & leave"
+        :loading="busy.has('stop')"
         @click="emit('stop')"
       >⏹</AppButton>
-      <AppButton variant="ghost" size="sm" @click="onLoop">
+      <AppButton
+        variant="ghost"
+        size="sm"
+        :loading="busy.has('loop')"
+        @click="onLoop"
+      >
         {{ loopBadge(snap.loop) }}
       </AppButton>
       <AppButton
         variant="ghost"
         size="sm"
         :title="snap.shuffle ? 'Shuffle on' : 'Shuffle off'"
+        :loading="busy.has('shuffle')"
         @click="emit('shuffle', !snap.shuffle)"
       >
         {{ snap.shuffle ? "🔀 on" : "🔀 off" }}
@@ -120,6 +142,7 @@ function onLoop() {
       <AppButton
         variant="ghost"
         size="sm"
+        :loading="busy.has('autoplay')"
         @click="emit('autoplay', !snap.autoplay)"
       >
         {{ autoplayBadge(snap.autoplay, snap.autoplayFetchCount) }}
