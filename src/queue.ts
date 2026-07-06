@@ -105,6 +105,14 @@ export interface GuildState {
    *  mid-session shuffles the upcoming queue. */
   shuffle: boolean;
   /**
+   * While shuffle is on, the queue's qids in their *original* (pre-shuffle)
+   * order — snapshotted the moment shuffle is turned on, and appended to as
+   * tracks are enqueued (so new tracks sort to the back). Lets
+   * `setShuffle(false)` restore the upcoming tracks to their original
+   * relative order. Null whenever shuffle is off.
+   */
+  origOrder: number[] | null;
+  /**
    * The session has been exhausted — peekNext returned null after a
    * track ended or the user clicked /next past the last track, and the
    * caller decided to stop rather than loop. Tells the advance loop the
@@ -156,6 +164,7 @@ function ensure(guildId: string): GuildState {
       autoplaySeededFrom: null,
       autoplayFetchCount: DEFAULT_AUTOPLAY_FETCH_COUNT,
       shuffle: false,
+      origOrder: null,
       done: false,
     };
     states.set(guildId, s);
@@ -188,6 +197,10 @@ export function getPlayed(s: GuildState): Track[] {
 export function enqueue(guildId: string, track: Track): number {
   const s = ensure(guildId);
   if (track.qid === undefined) track.qid = nextQid++;
+  // While shuffled, record the track's place in the original (pre-shuffle)
+  // order — at the end, so it sorts to the back when shuffle is turned off.
+  // (origOrder is non-null iff shuffle is on.)
+  s.origOrder?.push(track.qid);
   if (s.shuffle) {
     // Shuffle on: drop the new track at a random spot among the upcoming
     // tracks (everything after the cursor) instead of always at the end —
@@ -248,6 +261,9 @@ export function resetQueue(guildId: string): void {
   bumpEpoch(guildId);
   s.tracks.length = 0;
   s.cursor = -1;
+  // Keep the shuffle flag, but start a fresh original-order snapshot: the
+  // incoming batch (enqueued next) rebuilds it in its pre-shuffle order.
+  if (s.origOrder) s.origOrder = [];
 }
 
 /**
@@ -341,7 +357,36 @@ export function setLoop(guildId: string, mode: LoopMode): void {
 }
 
 export function setShuffle(guildId: string, on: boolean): void {
-  ensure(guildId).shuffle = on;
+  const s = ensure(guildId);
+  if (s.shuffle === on) return; // idempotent — don't re-snapshot / re-restore
+  s.shuffle = on;
+  if (on) {
+    // Snapshot the current order so it can be restored on toggle-off. Taken
+    // BEFORE the caller's shuffleUpcoming() physically reorders `tracks`.
+    s.origOrder = s.tracks.map((t) => t.qid!);
+  } else {
+    restoreOriginalOrder(s);
+    s.origOrder = null;
+  }
+}
+
+/** Reorder the UPCOMING tracks (everything after the cursor) back into their
+ *  original relative order, captured in `origOrder` when shuffle was turned
+ *  on. Played + current tracks keep their positions — you can't un-play them.
+ *  Tracks added while shuffled were appended to `origOrder`, so they sort to
+ *  the back; manual drags made while shuffled aren't recorded, so toggling
+ *  shuffle off discards them and returns to the snapshot order. */
+function restoreOriginalOrder(s: GuildState): void {
+  if (!s.origOrder) return;
+  const start = s.cursor + 1;
+  if (start >= s.tracks.length) return; // nothing upcoming to restore
+  const rank = new Map<number, number>();
+  s.origOrder.forEach((qid, i) => rank.set(qid, i));
+  const upcoming = s.tracks.slice(start);
+  upcoming.sort(
+    (a, b) => (rank.get(a.qid!) ?? Infinity) - (rank.get(b.qid!) ?? Infinity),
+  );
+  s.tracks.splice(start, upcoming.length, ...upcoming);
 }
 
 /** Randomize the order of the UPCOMING tracks (everything after the cursor)
