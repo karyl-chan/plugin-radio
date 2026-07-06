@@ -122,6 +122,19 @@ interface CachedToken {
 }
 const SESSION_TOKEN_REFRESH_MARGIN_MS = 30 * 60_000;
 const sessionTokens = new Map<string, CachedToken>();
+// Session tokens are cached per (guild, user), NOT per guild: the minted JWT
+// embeds the member's real Discord id, and the personal /api/me/* routes now
+// authorize by it — so a guild-only key would hand member A's token to member
+// B (who ran /radio np in the same guild) and let B act as A. Key by both.
+const sessionCacheKey = (guildId: string, userId: string): string =>
+  `${guildId}:${userId}`;
+/** Drop every cached session token for a guild (all users) — on stop. */
+function clearGuildSessionTokens(guildId: string): void {
+  const prefix = `${guildId}:`;
+  for (const key of sessionTokens.keys()) {
+    if (key.startsWith(prefix)) sessionTokens.delete(key);
+  }
+}
 // Personal-page tokens are guildless (no guild_id) and carry the member's
 // real Discord id, so they're cached per user rather than per guild.
 const personalTokens = new Map<string, CachedToken>();
@@ -131,7 +144,8 @@ async function getSessionToken(
   userId: string,
   guildId: string,
 ): Promise<string | null> {
-  const cached = sessionTokens.get(guildId);
+  const key = sessionCacheKey(guildId, userId);
+  const cached = sessionTokens.get(key);
   if (
     cached &&
     cached.expiresAt - Date.now() > SESSION_TOKEN_REFRESH_MARGIN_MS
@@ -144,7 +158,7 @@ async function getSessionToken(
     guild_id: guildId,
   })) as { token?: string; expiresAt?: number } | null;
   if (!res || typeof res.token !== "string") return null;
-  sessionTokens.set(guildId, {
+  sessionTokens.set(key, {
     token: res.token,
     expiresAt: typeof res.expiresAt === "number" ? res.expiresAt : Date.now(),
   });
@@ -366,7 +380,7 @@ function controlHandler(
 
       if (action === "stop") {
         await doStop(guildId);
-        sessionTokens.delete(guildId);
+        clearGuildSessionTokens(guildId);
         const onPublicMessage =
           nowPlaying.getMessage(guildId)?.messageId === ctx.messageId;
         await nowPlaying.teardown(guildId).catch(() => {});
@@ -869,7 +883,7 @@ export default function buildPlugin() {
 
                   case "stop": {
                     await doStop(guildId);
-                    sessionTokens.delete(guildId);
+                    clearGuildSessionTokens(guildId);
                     await nowPlaying.teardown(guildId).catch(() => {});
                     return t(locale, "stop.done");
                   }
@@ -999,12 +1013,20 @@ export default function buildPlugin() {
                     if (typeof resolved === "string") return resolved;
                     resolved.queuedByName = ctx.userDisplayName;
                     const position = enqueue(guildId, resolved);
+                    // With shuffle on, enqueue drops the track at a random slot,
+                    // so the upcoming-count "position" would be misleading — say
+                    // "shuffled in" instead.
+                    const shuffledIn = getState(guildId)?.shuffle ?? false;
                     await syncNowPlaying(guildId);
                     return playbackReply(ctx, guildId, locale, {
-                      description: t(locale, "queue.addedAtPositionSingular", {
-                        label: resolved.label,
-                        position,
-                      }),
+                      description: shuffledIn
+                        ? t(locale, "queue.addedShuffled", {
+                            label: resolved.label,
+                          })
+                        : t(locale, "queue.addedAtPositionSingular", {
+                            label: resolved.label,
+                            position,
+                          }),
                       ...(resolved.coverUrl
                         ? { thumbnail: { url: resolved.coverUrl } }
                         : {}),
@@ -1017,22 +1039,22 @@ export default function buildPlugin() {
                     // /playlist URL) implies "keep this going" → switch autoplay
                     // on; any other source turns it off (a fresh play resets it).
                     const autoOn = isYouTubeUrlWithList(source);
-                    setAutoplay(guildId, autoOn);
-                    // Optional `shuffle:` on /radio play sets the session
-                    // shuffle mode (persists like autoplay); playBulk then
-                    // randomizes the tracks so even the first is random.
                     const shuffleOpt = ctx.options.shuffle;
-                    if (typeof shuffleOpt === "boolean") {
-                      setShuffle(guildId, shuffleOpt);
-                    }
                     const autoNote = autoOn ? t(locale, "autoplay.notice.on") : "";
+                    // `play` is a fresh start, so apply the session modes only
+                    // AFTER we've actually joined voice — a join failure must not
+                    // toggle (and snapshot) modes on the previous session. Both
+                    // reset every play: autoplay from the source, shuffle to off
+                    // unless the `shuffle:` option overrides it.
                     const joinFirst = async (): Promise<string | null> => {
                       try {
                         await ctx.voice.join({ guildId, userId });
-                        return null;
                       } catch {
                         return t(locale, "error.voice.joinFailed");
                       }
+                      setAutoplay(guildId, autoOn);
+                      setShuffle(guildId, shuffleOpt === true);
+                      return null;
                     };
 
                     if (isYouTubePlaylistUrl(source)) {

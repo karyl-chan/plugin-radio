@@ -142,6 +142,7 @@ export const en = {
   "queue.skippedSuffixPlural": " ({n} entries skipped)",
   "queue.addedAtPositionSingular":
     "➕ Queued **{label}** (position {position}).",
+  "queue.addedShuffled": "🔀 Queued **{label}** (shuffled into the queue).",
   "queue.addedAtPositionPlural":
     "➕ Queued **{label}** (position {position}).",
 

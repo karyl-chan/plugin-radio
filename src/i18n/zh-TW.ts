@@ -138,6 +138,7 @@ export const zhTW: Record<LocaleKey, string> = {
   "queue.skippedSuffixPlural": " (略過 {n} 首)",
   "queue.addedAtPositionSingular":
     "➕ 已排入 **{label}** (位置 {position})。",
+  "queue.addedShuffled": "🔀 已排入 **{label}** (隨機插入佇列)。",
   "queue.addedAtPositionPlural":
     "➕ 已排入 **{label}** (位置 {position})。",
 

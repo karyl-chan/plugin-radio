@@ -138,6 +138,7 @@ export const zhCN: Record<LocaleKey, string> = {
   "queue.skippedSuffixPlural": " (略过 {n} 首)",
   "queue.addedAtPositionSingular":
     "➕ 已排入 **{label}** (位置 {position})。",
+  "queue.addedShuffled": "🔀 已排入 **{label}** (随机插入队列)。",
   "queue.addedAtPositionPlural":
     "➕ 已排入 **{label}** (位置 {position})。",
 
