@@ -28,7 +28,6 @@ import {
   setAutoplayFetchCount,
   setLoop,
   setShuffle,
-  shuffleTracks,
   shuffleUpcoming,
 } from "./queue.js";
 import { withGuildLock } from "./guild-lock.js";
@@ -278,9 +277,9 @@ async function playBulk(
   tracks: Track[],
 ): Promise<Track | null> {
   resetQueue(guildId);
-  // Shuffle the whole set before enqueue when shuffle is on, so even the
-  // first track that starts is random (resetQueue keeps the shuffle flag).
-  if (getState(guildId)?.shuffle) shuffleTracks(tracks);
+  // enqueue() drops each track into a random upcoming slot when shuffle is
+  // on (resetQueue keeps the shuffle flag), so even the first track that
+  // starts is random — no separate pre-shuffle needed.
   for (const t of tracks) enqueue(guildId, t);
   let started: Track | null = null;
   for (let i = 0; i < 5 && !started; i++) {
@@ -420,6 +419,13 @@ function controlHandler(
         setLoop(guildId, cycleLoopMode(cur));
       } else if (action === "autoplay") {
         setAutoplay(guildId, !(getState(guildId)?.autoplay ?? false));
+      } else if (action === "shuffle") {
+        const on = !(getState(guildId)?.shuffle ?? false);
+        setShuffle(guildId, on);
+        // Mirror the slash / WebUI toggle: shuffle the already-queued
+        // upcoming tracks when turning on (future adds are mixed in by
+        // enqueue).
+        if (on) shuffleUpcoming(guildId);
       }
 
       const reply = await syncNowPlaying(guildId, {

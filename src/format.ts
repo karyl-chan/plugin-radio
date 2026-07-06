@@ -160,6 +160,9 @@ export function renderNowPlayingEmbed(
   if (s?.autoplay) {
     lines.push(t(locale, "now.autoplayOn", { count: s.autoplayFetchCount }));
   }
+  if (s?.shuffle) {
+    lines.push(t(locale, "now.shuffleOn"));
+  }
 
   return {
     title: paused ? t(locale, "now.titlePaused") : t(locale, "now.titlePlaying"),
@@ -172,7 +175,7 @@ export function renderNowPlayingEmbed(
 /**
  * Build the two action rows for the now-playing message:
  *   row 1 — ⏮ prev · ⏯ play/pause · ⏭ next · ⏹ stop · 🔁 loop-cycle
- *   row 2 — ♾️ autoplay-toggle · 🎛 WebUI (link button; only when `webuiUrl` is non-null)
+ *   row 2 — ♾️ autoplay-toggle · 🔀 shuffle-toggle · 🎛 WebUI (link button; only when `webuiUrl` is non-null)
  * The control buttons carry `kc:<pluginKey>:<action>` custom ids (built
  * via the SDK's componentCustomId) and stay live for as long as the
  * message exists. `prev` is disabled with no play history; the loop and
@@ -192,6 +195,7 @@ export function nowPlayingComponents(
   const s = getState(guildId);
   const loop: LoopMode = s?.loop ?? "off";
   const autoplay = s?.autoplay ?? false;
+  const shuffle = s?.shuffle ?? false;
   const hasPrev = hasPrevious(guildId);
   const btn = (
     id: string,
@@ -216,7 +220,10 @@ export function nowPlayingComponents(
       ],
     } as unknown as MessageActionRow,
   ];
-  const row2: unknown[] = [btn("autoplay", "♾️", { style: autoplay ? 1 : 2 })];
+  const row2: unknown[] = [
+    btn("autoplay", "♾️", { style: autoplay ? 1 : 2 }),
+    btn("shuffle", "🔀", { style: shuffle ? 1 : 2 }),
+  ];
   if (webuiUrl) {
     row2.push({ type: 2, style: 5, label: t(locale, "btn.webuiShort"), url: webuiUrl });
   }

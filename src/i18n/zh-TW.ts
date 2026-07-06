@@ -187,6 +187,7 @@ export const zhTW: Record<LocaleKey, string> = {
   "now.inChannel": "於 <#{channelId}>",
   "now.loopBadge": "{badge} 循環 `{mode}`",
   "now.autoplayOn": "♾️ 自動播放開啟 (×{count})",
+  "now.shuffleOn": "🔀 隨機播放開啟",
   "now.titlePlaying": "🎶 正在播放",
   "now.titlePaused": "⏸️ 已暫停",
 

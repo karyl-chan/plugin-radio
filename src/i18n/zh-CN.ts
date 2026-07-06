@@ -187,6 +187,7 @@ export const zhCN: Record<LocaleKey, string> = {
   "now.inChannel": "于 <#{channelId}>",
   "now.loopBadge": "{badge} 循环 `{mode}`",
   "now.autoplayOn": "♾️ 自动播放开启 (×{count})",
+  "now.shuffleOn": "🔀 随机播放开启",
   "now.titlePlaying": "🎶 正在播放",
   "now.titlePaused": "⏸️ 已暂停",
 

@@ -85,6 +85,7 @@ function onLoop() {
         </div>
         <div class="np-badges">
           <span class="badge">{{ loopBadge(snap.loop) }}</span>
+          <span v-if="snap.shuffle" class="badge">🔀 shuffle</span>
           <span v-if="snap.autoplay" class="badge">
             ♾️ autoplay · {{ snap.autoplayFetchCount || 7 }}
           </span>

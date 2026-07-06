@@ -191,6 +191,7 @@ export const en = {
   "now.inChannel": "in <#{channelId}>",
   "now.loopBadge": "{badge} loop `{mode}`",
   "now.autoplayOn": "♾️ autoplay on (×{count})",
+  "now.shuffleOn": "🔀 shuffle on",
   "now.titlePlaying": "🎶 Now playing",
   "now.titlePaused": "⏸️ Paused",
 

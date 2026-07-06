@@ -188,14 +188,27 @@ export function getPlayed(s: GuildState): Track[] {
 export function enqueue(guildId: string, track: Track): number {
   const s = ensure(guildId);
   if (track.qid === undefined) track.qid = nextQid++;
-  s.tracks.push(track);
+  if (s.shuffle) {
+    // Shuffle on: drop the new track at a random spot among the upcoming
+    // tracks (everything after the cursor) instead of always at the end —
+    // so manual adds, autoplay refills and playlist appends are all mixed
+    // in, not just the tracks present when shuffle was toggled on. This is
+    // what makes shuffle behave as an ongoing mode rather than a one-shot
+    // reorder. The physical queue stays in play order, so the WebUI's queue
+    // list still shows exactly what will play (WYSIWYG).
+    const lo = s.cursor + 1;
+    const pos = lo + Math.floor(Math.random() * (s.tracks.length - lo + 1));
+    s.tracks.splice(pos, 0, track);
+  } else {
+    s.tracks.push(track);
+  }
   // Adding a track revives a previously-finished session — the advance
   // loop's next tick will see `done=false` + `!status.playing` + a fresh
   // peekNext candidate and start playing.
   s.done = false;
   // First enqueue while idle: leave cursor at -1; the caller's first
   // advance() will commit it to 0. Don't auto-play just by enqueueing.
-  return s.tracks.length - s.cursor - 1; // upcoming count after this push
+  return s.tracks.length - s.cursor - 1; // upcoming count after this add
 }
 
 /**
@@ -329,16 +342,6 @@ export function setLoop(guildId: string, mode: LoopMode): void {
 
 export function setShuffle(guildId: string, on: boolean): void {
   ensure(guildId).shuffle = on;
-}
-
-/** Fisher-Yates shuffle a Track[] in place, returning it. Used to randomize
- *  a multi-track `play` before enqueue so even the first track is random. */
-export function shuffleTracks(tracks: Track[]): Track[] {
-  for (let i = tracks.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
-  }
-  return tracks;
 }
 
 /** Randomize the order of the UPCOMING tracks (everything after the cursor)
