@@ -13,7 +13,7 @@ import type { UserFavorite } from "../types";
  * demand — the pattern mirrors use-api-keys.
  */
 export function useFavorites() {
-  const { error } = useToast();
+  const { ok, error } = useToast();
   const favorites = ref<UserFavorite[]>([]);
   const loaded = ref(false);
   const sourceSet = computed(
@@ -56,8 +56,10 @@ export function useFavorites() {
           r.favorite,
           ...favorites.value.filter((f) => f.source !== source),
         ];
+        ok("Added to favorites");
       } else {
         favorites.value = favorites.value.filter((f) => f.source !== source);
+        ok("Removed from favorites");
       }
     } catch (e: any) {
       error(e.message);
@@ -68,6 +70,7 @@ export function useFavorites() {
     try {
       await api("DELETE", "/api/me/favorites/" + encodeURIComponent(id));
       favorites.value = favorites.value.filter((f) => f.id !== id);
+      ok("Removed from favorites");
     } catch (e: any) {
       error(e.message);
     }

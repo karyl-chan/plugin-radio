@@ -205,21 +205,26 @@ watch(
 
       <div class="info">
         <div class="name">
-          <TrackLink :label="t.label" :url="t.sourceUrl" />
+          <span class="name-text">
+            <TrackLink :label="t.label" :url="t.sourceUrl" />
+          </span>
+          <button
+            v-if="canFavorite && trackKey(t)"
+            type="button"
+            class="row-action star"
+            :class="{ 'star--on': isFav(t), 'star--busy': isFavBusy(t) }"
+            :title="isFav(t) ? 'Remove from favorites' : 'Add to favorites'"
+            :disabled="isFavBusy(t)"
+            @click.stop="emit('toggleFavorite', t)"
+          >
+            <span v-if="isFavBusy(t)" class="star-spin" aria-label="Saving" />
+            <template v-else>{{ isFav(t) ? "★" : "☆" }}</template>
+          </button>
         </div>
         <div class="dim" v-if="sub(t)">{{ sub(t) }}</div>
       </div>
 
       <div class="actions">
-        <button
-          v-if="canFavorite && trackKey(t)"
-          type="button"
-          class="row-action star"
-          :class="{ 'star--on': isFav(t), 'star--busy': isFavBusy(t) }"
-          :title="isFav(t) ? 'Remove from favorites' : 'Add to favorites'"
-          :disabled="isFavBusy(t)"
-          @click.stop="emit('toggleFavorite', t)"
-        >{{ isFav(t) ? "★" : "☆" }}</button>
         <AppButton
           v-if="!isCursor"
           variant="ghost"
@@ -363,11 +368,21 @@ watch(
 }
 
 .info { min-width: 0; flex: 1; }
+/* Title + ☆ on one line: the ☆ sits right after the (clipped) title rather
+   than at the row's far edge. Flex keeps the star visible even when the
+   title is long — the title shrinks with an ellipsis, capped at 350px. */
 .name {
+  display: flex;
+  align-items: center;
   font-weight: 550;
-  white-space: nowrap;
+}
+.name-text {
+  display: inline-block;
+  min-width: 0;
+  max-width: 350px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dim {
   color: var(--text-muted);
@@ -382,9 +397,9 @@ watch(
   gap: 0.35rem;
   flex-shrink: 0;
   align-items: center;
-  /* Room for the ☆ favorite + ✕ remove, reserved so a hover-reveal
-     doesn't shift the row's other contents. */
-  min-width: 3.4rem;
+  /* Room for the ✕ remove (the ☆ now lives next to the title), reserved
+     so its hover-reveal doesn't shift the row's other contents. */
+  min-width: 1.8rem;
   justify-content: flex-end;
 }
 
@@ -393,8 +408,9 @@ watch(
 .star {
   background: transparent;
   border: 0;
-  padding: 0 0.15rem;
-  margin: 0;
+  padding: 0;
+  margin-left: 4px;
+  flex-shrink: 0;
   font: inherit;
   font-size: 1.05rem;
   line-height: 1;
@@ -407,19 +423,24 @@ watch(
   opacity: 1;
   color: var(--accent);
 }
-/* Toggle in flight: force the star visible (the pointer may have left the
-   row) and pulse it so the pending state reads even mid-hover-hide. */
+/* Toggle in flight: keep the star visible (the pointer may have left the row)
+   and swap the glyph for a spinner so the pending state is unmistakable. */
 .star.star--busy {
   opacity: 1;
-  color: var(--accent);
   cursor: default;
-  animation: star-pulse 0.8s ease-in-out infinite;
 }
-@keyframes star-pulse {
-  50% { opacity: 0.4; }
+.star-spin {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid var(--text-faint);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  vertical-align: -0.05em;
+  animation: idx-spin 0.6s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .star.star--busy { animation: none; opacity: 0.7; }
+  .star-spin { animation-duration: 1.4s; }
 }
 
 /* drag */
