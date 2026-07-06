@@ -237,8 +237,8 @@ watch(
     </li>
 
     <li
-      v-for="src in pendingAdds"
-      :key="'add-' + src"
+      v-for="(src, i) in pendingAdds"
+      :key="'add-' + i + '-' + src"
       class="item track-item pending no-drag"
     >
       <span class="drag-handle drag-handle--ghost" aria-hidden="true">⋮⋮</span>

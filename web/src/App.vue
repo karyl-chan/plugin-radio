@@ -23,6 +23,11 @@ const sessionGuildId = ref<string | null>(null);
 // The "logged-in as" profile (name + avatar) for the top-right chip.
 // Null = anonymous (the public now-playing token) or not yet resolved.
 const viewer = ref<ViewerProfile | null>(null);
+// Whether the session token carries a real (non-synthetic) user — gates the
+// player's ☆ / Save-as-playlist. Derived from the token's userId, NOT from
+// `viewer`: a best-effort resolveViewer hiccup must not disable those controls
+// for a genuinely logged-in member (the server still serves their data).
+const loggedIn = ref(false);
 
 function deny(msg: string): void {
   deniedMessage.value = msg;
@@ -117,6 +122,8 @@ async function bootstrap(): Promise<void> {
   // SessionView can scope its requests.
   if (typeof handle.claims.guildId === "string") {
     sessionGuildId.value = handle.claims.guildId;
+    const uid = handle.claims.userId;
+    loggedIn.value = !!uid && !uid.startsWith("radio-np:");
     view.value = "session";
     void loadViewer("session", handle.claims.guildId, handle.claims.userId);
     return;
@@ -174,7 +181,7 @@ const meUrl = computed(() => (window.__PLUGIN_BASE__ ?? "") + "/me");
     <SessionView
       v-else-if="view === 'session' && sessionGuildId"
       :guild-id="sessionGuildId"
-      :logged-in="viewer !== null"
+      :logged-in="loggedIn"
     />
     <ManageView v-else-if="view === 'manage'" />
     <PersonalView v-else-if="view === 'personal'" />
