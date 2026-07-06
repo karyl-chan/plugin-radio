@@ -87,6 +87,7 @@ export interface UserPlaylist {
  */
 export interface UserFavorite {
   id: string;
+  ownerId: string;
   source: string;
   label: string;
   coverUrl?: string;

@@ -94,6 +94,7 @@ const snap = ref<SessionSnapshot>({
   loop: "off",
   autoplay: true,
   autoplayFetchCount: 7,
+  shuffle: false,
   playlist: tracks,
   cursorQid: 4,
 });
@@ -177,6 +178,8 @@ createApp({
             onLoop: (mode: "off" | "track" | "queue") =>
               (snap.value = { ...snap.value, loop: mode }),
             onAutoplay: setAutoplay,
+            onShuffle: (on: boolean) =>
+              (snap.value = { ...snap.value, shuffle: on }),
           }),
           h("div", { class: "card" }, [
             h("div", { class: "row" }, [

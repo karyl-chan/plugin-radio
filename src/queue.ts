@@ -346,7 +346,12 @@ export function shuffleTracks(tracks: Track[]): Track[] {
  *  already-played tracks keep their positions. */
 export function shuffleUpcoming(guildId: string): void {
   const s = ensure(guildId);
-  bumpEpoch(guildId);
+  // No epoch bump: shuffle only REORDERS the upcoming tracks — it adds and
+  // removes nothing, so an in-flight `queue` resolve (whose tracks were
+  // captured before the shuffle) is still valid to append. The epoch guard
+  // is for session *replacement* (clearQueue / reset); bumping here would
+  // 409 a concurrent WebUI add for no reason. The call sites already hold
+  // the guild lock, which provides the needed mutual exclusion.
   const start = s.cursor + 1;
   for (let i = s.tracks.length - 1; i > start; i--) {
     const j = start + Math.floor(Math.random() * (i - start + 1));

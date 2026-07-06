@@ -4,7 +4,7 @@ import Sortable from "sortablejs";
 import { AppButton } from "@karyl-chan/ui";
 import Thumb from "./Thumb.vue";
 import TrackLink from "./TrackLink.vue";
-import { trackMeta } from "../composables/use-format";
+import { trackKey, trackMeta } from "../composables/use-format";
 import type { Track } from "../types";
 
 /**
@@ -45,12 +45,8 @@ const emit = defineEmits<{
   (e: "toggleFavorite", track: Track): void;
 }>();
 
-/** The favorite key for a row — the same key the store dedupes on. */
-function favKey(t: Track): string | null {
-  return t.trackId ?? t.sourceUrl ?? null;
-}
 function isFav(t: Track): boolean {
-  const k = favKey(t);
+  const k = trackKey(t);
   return !!k && props.favoriteSources.has(k);
 }
 
@@ -195,7 +191,7 @@ watch(
 
       <div class="actions">
         <button
-          v-if="canFavorite && favKey(t)"
+          v-if="canFavorite && trackKey(t)"
           type="button"
           class="row-action star"
           :class="{ 'star--on': isFav(t) }"

@@ -12,6 +12,17 @@ export function fmtSize(b?: number): string {
     : `${(b / 1048576).toFixed(1)} MB`;
 }
 
+/** The stable "favorite source key" for a queue track — the same string the
+ *  backend stores as `user_favorites.source` and the ☆ membership check
+ *  compares against. `trackId` (library) wins, else the display `sourceUrl`
+ *  (YouTube page / direct / station stream URL); null when neither exists. */
+export function trackKey(t: {
+  trackId?: string;
+  sourceUrl?: string;
+}): string | null {
+  return t.trackId ?? t.sourceUrl ?? null;
+}
+
 export function loopBadge(m: "off" | "track" | "queue"): string {
   return m === "track"
     ? "🔂 repeat track"

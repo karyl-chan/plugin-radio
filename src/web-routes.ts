@@ -1038,6 +1038,7 @@ export async function registerWebRoutes(
         return reply.code(400).send({ error: "Invalid JSON" });
       }
       return withGuildLock(guildId, async () => {
+        keepAdvancing(guildId);
         const cur = getState(guildId)?.shuffle ?? false;
         const on = typeof body?.on === "boolean" ? body.on : !cur;
         setShuffle(guildId, on);

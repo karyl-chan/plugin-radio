@@ -7,6 +7,7 @@ import Thumb from "../components/Thumb.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
 import { useFavorites } from "../composables/use-favorites";
+import { trackKey } from "../composables/use-format";
 import type { LoopMode, SessionSnapshot, Track, UserFavorite } from "../types";
 
 const props = defineProps<{ guildId: string; loggedIn?: boolean }>();
@@ -116,7 +117,7 @@ function hideSuggestionsSoon(): void {
 
 // ── ☆ toggle from a queue row (PlaylistList emits the Track) ─────────
 function onToggleFavorite(t: Track): void {
-  const source = t.trackId ?? t.sourceUrl;
+  const source = trackKey(t);
   if (!source) return;
   void toggleFavoriteSource(source, t.label, t.coverUrl);
 }
@@ -125,7 +126,7 @@ function onToggleFavorite(t: Track): void {
 // Reuses POST /api/me/playlists; the session token (real user) is accepted.
 async function saveAsPlaylist(): Promise<void> {
   const entries = playlist.value
-    .map((t) => t.trackId ?? t.sourceUrl)
+    .map(trackKey)
     .filter((s): s is string => !!s);
   if (entries.length === 0) {
     error("Nothing in the playlist to save.");
