@@ -1117,6 +1117,27 @@ export async function registerWebRoutes(
           toQueue = [track];
         }
       }
+      // Cold start: if the bot isn't in voice, join the session user's
+      // channel; if nothing is playing, start the newly-added tracks — so an
+      // add-to-queue into an idle or left session actually plays (mirrors
+      // /api/ext/queue). An already-playing session just appends.
+      const status = (await runtime()
+        .voice.status(guildId)
+        .catch(() => null)) as {
+        connected?: boolean;
+        playing?: boolean;
+      } | null;
+      const needJoin = !status?.connected;
+      const needStart = !status?.playing;
+      if (needJoin) {
+        try {
+          await runtime().voice.join({ guildId, userId: claims.userId });
+        } catch {
+          return reply.code(409).send({
+            error: "I'm not in a voice channel — join one and try again.",
+          });
+        }
+      }
       return withGuildLock(guildId, async () => {
         if (getEpoch(guildId) !== epochAtStart) {
           // Session was cleared / reset while we were resolving — abort
@@ -1128,6 +1149,7 @@ export async function registerWebRoutes(
         }
         keepAdvancing(guildId);
         for (const t of toQueue) enqueue(guildId, t);
+        if (needStart) await doNext(guildId);
         return syncAndSnapshot(guildId);
       });
     },
