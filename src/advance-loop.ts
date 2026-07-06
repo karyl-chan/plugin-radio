@@ -11,6 +11,7 @@ import {
   getState,
   peekNext,
   removeTrackAt,
+  resetQueue,
 } from "./queue.js";
 import {
   playTrack,
@@ -18,7 +19,6 @@ import {
   resolveAutoplayRecommendations,
   youtubeVideoIdOf,
 } from "./resolver.js";
-import { doStop } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import { runtime, type BotRpc } from "./runtime.js";
@@ -203,12 +203,13 @@ type VoiceStatus = {
 
 /**
  * End a session that has nothing left to play (queue drained, not looping)
- * or whose channel emptied: stop playback, LEAVE the voice channel, and drop
- * all per-guild advance state. This is what makes the bot auto-leave when a
- * playlist finishes — an idle session previously only tore down its
- * now-playing card and left the bot sitting silently in the channel. Runs
- * under the caller's guild lock; `doStop` tolerates an already-gone voice
- * connection, so it's safe even if the bot was disconnected externally.
+ * or whose channel emptied: stop playback and LEAVE the voice channel. This is
+ * what makes the bot auto-leave when a playlist finishes — an idle session
+ * previously only tore down its now-playing card and sat silently in the
+ * channel. The queue is cleared but the member's loop/autoplay/shuffle
+ * settings are kept (resetQueue, not a full state delete). Runs under the
+ * caller's guild lock; the stop/leave are allSettled so an already-gone voice
+ * connection is tolerated.
  */
 async function endAndLeave(
   guildId: string,
@@ -220,7 +221,14 @@ async function endAndLeave(
   seenGuilds.delete(guildId);
   prefetched.delete(guildId);
   lastListenerAt.delete(guildId);
-  await doStop(guildId).catch(() => {});
+  // Stop + leave voice, but keep the GuildState's settings (loop / autoplay /
+  // shuffle): clear only the queue (resetQueue) and mark the session ended,
+  // rather than deleting the whole state (doStop). A later re-queue then
+  // resumes with the member's preferences instead of falling back to defaults.
+  const voice = runtime().voice;
+  await Promise.allSettled([voice.stop(guildId), voice.leave(guildId)]);
+  resetQueue(guildId);
+  endSession(guildId);
   await nowPlaying.teardown(guildId).catch(() => {});
 }
 

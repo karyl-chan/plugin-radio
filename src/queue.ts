@@ -382,9 +382,13 @@ function restoreOriginalOrder(s: GuildState): void {
   if (start >= s.tracks.length) return; // nothing upcoming to restore
   const rank = new Map<number, number>();
   s.origOrder.forEach((qid, i) => rank.set(qid, i));
+  // Unknown-rank tracks (shouldn't happen — every enqueue records origOrder)
+  // sort to the end via a FINITE sentinel: `Infinity - Infinity` is NaN, which
+  // makes the comparator non-transitive and corrupts Array.sort.
+  const END = s.origOrder.length;
   const upcoming = s.tracks.slice(start);
   upcoming.sort(
-    (a, b) => (rank.get(a.qid!) ?? Infinity) - (rank.get(b.qid!) ?? Infinity),
+    (a, b) => (rank.get(a.qid!) ?? END) - (rank.get(b.qid!) ?? END),
   );
   s.tracks.splice(start, upcoming.length, ...upcoming);
 }

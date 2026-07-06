@@ -277,8 +277,13 @@ export async function resolveEntriesToTracks(
       resolved.label = entry.label;
     }
     if (!resolved.coverUrl && cover) resolved.coverUrl = cover;
-    resolved.source = "playlist";
-    if (playlistId) resolved.playlistId = playlistId;
+    // Only mark playlist provenance when this really is a stored playlist —
+    // the favorite-queue path reuses this resolver for a single favorite and
+    // passes no playlistId, so it must NOT be tagged source:"playlist".
+    if (playlistId) {
+      resolved.source = "playlist";
+      resolved.playlistId = playlistId;
+    }
     tracks.push(resolved);
   }
   return { tracks, skipped };

@@ -271,16 +271,21 @@ export function registerPersonalRoutes(
     }
     const target = await resolveTarget(me.userId, parseBody(request), reply);
     if (!target) return; // resolveTarget already replied (409)
-    if (!(await joinOr409(target, me.userId, reply))) return;
+    const { guildId } = target;
+    // Snapshot the epoch BEFORE the (slow) resolve so a concurrent stop/play
+    // that lands during it is caught by the guard below (reading it after the
+    // resolve would already reflect the bump and pass).
+    const epochAtStart = getEpoch(guildId);
     const { tracks } = await resolveEntriesToTracks(pl.entries, me.userId, pl.id);
     if (tracks.length === 0) {
       return reply
         .code(409)
         .send({ error: "None of this playlist's entries could be played right now." });
     }
-    const { guildId } = target;
+    // Join only once we know we have something to play — don't move/join the
+    // bot for a playlist that resolved to nothing.
+    if (!(await joinOr409(target, me.userId, reply))) return;
     await stampQueuedBy(tracks, me.userId, guildId);
-    const epochAtStart = getEpoch(guildId);
     return withGuildLock(guildId, async () => {
       if (getEpoch(guildId) !== epochAtStart) {
         return reply.code(409).send({ error: "Session changed — retry." });
@@ -310,20 +315,22 @@ export function registerPersonalRoutes(
     }
     const target = await resolveTarget(me.userId, parseBody(request), reply);
     if (!target) return; // resolveTarget already replied (409)
+    const { guildId } = target;
+    // Epoch snapshot BEFORE the resolve (see /play) so the guard below can
+    // detect a concurrent stop/play that happened during it.
+    const epochAtStart = getEpoch(guildId);
     const { tracks } = await resolveEntriesToTracks(pl.entries, me.userId, pl.id);
     if (tracks.length === 0) {
       return reply
         .code(409)
         .send({ error: "None of this playlist's entries could be played right now." });
     }
-    const { guildId } = target;
     await stampQueuedBy(tracks, me.userId, guildId);
     const status = (await runtime()
       .voice.status(guildId)
       .catch(() => null)) as { playing?: boolean } | null;
     const coldStart = !status?.playing;
     if (coldStart && !(await joinOr409(target, me.userId, reply))) return;
-    const epochAtStart = getEpoch(guildId);
     return withGuildLock(guildId, async () => {
       if (getEpoch(guildId) !== epochAtStart) {
         return reply.code(409).send({ error: "Session changed — retry." });
@@ -414,6 +421,10 @@ export function registerPersonalRoutes(
       if (!fav) return reply.code(404).send({ error: "Not found" });
       const target = await resolveTarget(me.userId, parseBody(request), reply);
       if (!target) return; // resolveTarget already replied (409)
+      const { guildId } = target;
+      // Epoch snapshot BEFORE the resolve (see /play) so the guard catches a
+      // concurrent stop/play during it.
+      const epochAtStart = getEpoch(guildId);
       // Carry the favorite's cached title + cover into the resolved Track so
       // a URL favorite shows its real meta immediately (it'd otherwise
       // resolve lazily and read as the raw link until played).
@@ -426,14 +437,12 @@ export function registerPersonalRoutes(
           .code(409)
           .send({ error: "This favorite couldn't be played right now." });
       }
-      const { guildId } = target;
       await stampQueuedBy(tracks, me.userId, guildId);
       const status = (await runtime()
         .voice.status(guildId)
         .catch(() => null)) as { playing?: boolean } | null;
       const coldStart = !status?.playing;
       if (coldStart && !(await joinOr409(target, me.userId, reply))) return;
-      const epochAtStart = getEpoch(guildId);
       return withGuildLock(guildId, async () => {
         if (getEpoch(guildId) !== epochAtStart) {
           return reply.code(409).send({ error: "Session changed — retry." });

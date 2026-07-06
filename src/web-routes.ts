@@ -847,7 +847,11 @@ export async function registerWebRoutes(
       const claims = authSession(request, reply, guildId);
       if (!claims) return;
       const LIMIT = 10;
-      const rawQ = (request.query?.q ?? "").trim();
+      // Fastify parses a repeated ?q=a&q=b into an array; guard so .trim()
+      // can't throw (a non-string query just means "no filter").
+      const rawQ = (
+        typeof request.query?.q === "string" ? request.query.q : ""
+      ).trim();
       const q = rawQ.toLowerCase();
       const hit = (...vals: (string | undefined)[]): boolean =>
         !q || vals.some((v) => v?.toLowerCase().includes(q));
@@ -1227,9 +1231,23 @@ export async function registerWebRoutes(
         connected?: boolean;
         playing?: boolean;
       } | null;
-      const needJoin = !status?.connected;
-      const needStart = !status?.playing;
+      // A null status is a transient voice.status RPC failure, NOT "idle" —
+      // treating it as idle would (wrongly) rejoin + doNext on a live session
+      // and skip the currently-playing track. Only cold-start when the bot
+      // EXPLICITLY reports disconnected / not playing; otherwise just append
+      // and let the advance loop carry on.
+      const needJoin = status ? !status.connected : false;
+      const needStart = status ? !status.playing : false;
       if (needJoin) {
+        // A synthetic public now-playing viewer (radio-np:) isn't a real
+        // Discord user the bot can locate, so a cold-start join can't work —
+        // don't attempt it with a bogus id; say so plainly instead.
+        if (claims.userId.startsWith(NP_SYNTHETIC_PREFIX)) {
+          return reply.code(409).send({
+            error:
+              "The bot isn't in a voice channel — ask someone in the server to start playback.",
+          });
+        }
         try {
           await runtime().voice.join({ guildId, userId: claims.userId });
         } catch {
