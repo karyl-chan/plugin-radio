@@ -137,7 +137,15 @@ export async function doJump(
 /** Stop playback, clear the queue, leave voice. */
 export async function doStop(guildId: string): Promise<void> {
   const voice = runtime().voice;
-  await Promise.all([voice.stop(guildId), voice.leave(guildId)]);
+  // stop + leave, tolerating either rejecting. Running them in parallel
+  // races on the voice service — `leave` disconnects, then the concurrent
+  // `stop` errors "not connected" (a 500 back through voice.stop) — and
+  // either can reject when the session is already gone. A stop must still
+  // clear local state + refresh the snapshot regardless, so a voice-op
+  // rejection must NOT throw the whole stop. Previously `Promise.all` let it
+  // throw, 500-ing the WebUI /stop and leaving the UI stuck showing
+  // "playing".
+  await Promise.allSettled([voice.stop(guildId), voice.leave(guildId)]);
   reset(guildId);
 }
 
