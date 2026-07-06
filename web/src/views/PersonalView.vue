@@ -7,15 +7,20 @@ import { api } from "../api";
 import { useToast } from "../composables/use-toast";
 import { useApiKeys } from "../composables/use-api-keys";
 import { useFavorites } from "../composables/use-favorites";
-import type { UserFavorite, UserPlaylist, VoiceMatch } from "../types";
+import type {
+  PlaylistEntry,
+  UserFavorite,
+  UserPlaylist,
+  VoiceMatch,
+} from "../types";
 
 const { ok, error } = useToast();
 
 type Tab = "playlists" | "favorites" | "keys";
-const activeTab = ref<Tab>("playlists");
+const activeTab = ref<Tab>("favorites");
 const tabs: TabDef[] = [
-  { key: "playlists", label: "My Playlists" },
   { key: "favorites", label: "Favorites" },
+  { key: "playlists", label: "Playlists" },
   { key: "keys", label: "API Keys" },
 ];
 function pickTab(key: string): void {
@@ -162,6 +167,51 @@ function entryCountText(n: number): string {
   return n === 1 ? "1 entry" : `${n} entries`;
 }
 
+// ── playlist expander: reveal a playlist's tracks in-place, each with a
+//    per-track "+ Queue" (like a favorite → queue) ─────────────────────
+const expandedIds = ref<Set<string>>(new Set());
+function isExpanded(id: string): boolean {
+  return expandedIds.value.has(id);
+}
+function toggleExpand(id: string): void {
+  const next = new Set(expandedIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expandedIds.value = next;
+}
+
+// Per-entry queue in-flight key ("<playlistId>:<index>") for the row spinner.
+const queueingEntryKey = ref<string | null>(null);
+function entryKey(playlistId: string, i: number): string {
+  return `${playlistId}:${i}`;
+}
+async function queueEntry(
+  p: UserPlaylist,
+  e: PlaylistEntry,
+  i: number,
+): Promise<void> {
+  const guildId = selectedGuildId.value;
+  if (!guildId) {
+    error("Join a voice channel first");
+    return;
+  }
+  const key = entryKey(p.id, i);
+  queueingEntryKey.value = key;
+  try {
+    await api("POST", "/api/me/queue-source", {
+      source: e.source,
+      label: e.label,
+      coverUrl: e.coverUrl,
+      guildId,
+    });
+    ok(`Queued "${e.label || e.source}"`);
+  } catch (err: any) {
+    error(err.message || "Couldn't queue this track");
+  } finally {
+    queueingEntryKey.value = null;
+  }
+}
+
 // ── API keys (self-service) — shared CRUD (see use-api-keys) ────────
 const {
   apiKeys,
@@ -281,37 +331,73 @@ onBeforeUnmount(() => {
     </div>
 
     <section class="section">
-      <div class="section-title">My playlists</div>
+      <div class="section-title">Playlists</div>
       <ul class="list">
         <li v-if="playlists.length === 0" class="empty">No playlists yet.</li>
-        <li v-for="p in playlists" :key="p.id" class="item">
-          <div class="thumb thumb--sm thumb--placeholder">🎵</div>
-          <div class="info">
-            <div class="name">{{ p.name }}</div>
-            <div class="dim">
-              {{ entryCountText(p.entries.length) }}{{ p.description ? " · " + p.description : "" }}
+        <li
+          v-for="p in playlists"
+          :key="p.id"
+          class="pl"
+          :class="{ 'pl--open': isExpanded(p.id) }"
+        >
+          <div class="pl-head">
+            <button
+              type="button"
+              class="pl-toggle"
+              :title="isExpanded(p.id) ? 'Collapse' : 'Show tracks'"
+              :disabled="p.entries.length === 0"
+              @click="toggleExpand(p.id)"
+            >{{ isExpanded(p.id) ? "▾" : "▸" }}</button>
+            <div class="thumb thumb--sm thumb--placeholder">🎵</div>
+            <div class="info">
+              <div class="name">{{ p.name }}</div>
+              <div class="dim">
+                {{ entryCountText(p.entries.length) }}{{ p.description ? " · " + p.description : "" }}
+              </div>
+            </div>
+            <div class="actions">
+              <AppButton
+                size="sm"
+                :loading="playingId === p.id"
+                :disabled="!canPlay || p.entries.length === 0"
+                @click="playPlaylist(p)"
+              >▶ Play</AppButton>
+              <AppButton variant="ghost" size="sm" @click="openEditPlaylist(p)">
+                ✎ Edit
+              </AppButton>
+              <AppButton
+                variant="danger"
+                size="sm"
+                :loading="deletingId === p.id"
+                :disabled="deletingId === p.id"
+                @click="removePlaylist(p)"
+              >
+                🗑
+              </AppButton>
             </div>
           </div>
-          <div class="actions">
-            <AppButton
-              size="sm"
-              :loading="playingId === p.id"
-              :disabled="!canPlay || p.entries.length === 0"
-              @click="playPlaylist(p)"
-            >▶ Play</AppButton>
-            <AppButton variant="ghost" size="sm" @click="openEditPlaylist(p)">
-              ✎ Edit
-            </AppButton>
-            <AppButton
-              variant="danger"
-              size="sm"
-              :loading="deletingId === p.id"
-              :disabled="deletingId === p.id"
-              @click="removePlaylist(p)"
+
+          <ul v-if="isExpanded(p.id)" class="pl-entries">
+            <li
+              v-for="(e, i) in p.entries"
+              :key="e.source + '-' + i"
+              class="pl-entry"
             >
-              🗑
-            </AppButton>
-          </div>
+              <Thumb :src="e.coverUrl" />
+              <div class="info">
+                <div class="name">{{ e.label || e.source }}</div>
+                <div class="dim" v-if="e.label && e.source.startsWith('http')">
+                  {{ e.source }}
+                </div>
+              </div>
+              <AppButton
+                size="sm"
+                :loading="queueingEntryKey === entryKey(p.id, i)"
+                :disabled="!canPlay"
+                @click="queueEntry(p, e, i)"
+              >+ Queue</AppButton>
+            </li>
+          </ul>
         </li>
       </ul>
     </section>
@@ -547,4 +633,50 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 .actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+
+/* ── expandable playlist row ─────────────────────────────────────────── */
+.pl {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+.pl-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+}
+.pl-toggle {
+  flex-shrink: 0;
+  width: 1.3rem;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: color var(--transition-fast);
+}
+.pl-toggle:hover:not(:disabled) { color: var(--text); }
+.pl-toggle:disabled { opacity: 0.3; cursor: default; }
+
+.pl-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem 0.6rem 0.55rem 2.05rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.pl-entry {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.3rem 0.35rem;
+  border-radius: var(--radius-sm);
+}
+.pl-entry:hover { background: var(--bg-surface-2); }
 </style>

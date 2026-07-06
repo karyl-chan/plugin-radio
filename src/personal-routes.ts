@@ -343,6 +343,50 @@ export function registerPersonalRoutes(
     });
   });
 
+  // Append a single arbitrary source (a playlist entry, typically) to the
+  // member's current voice queue — the source-based sibling of
+  // /favorites/:id/queue. Powers the /me playlist expander's per-track
+  // "+ Queue" button. Optional label/coverUrl carry the entry's cached meta
+  // so a URL track shows its real title/cover immediately.
+  server.post("/api/me/queue-source", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const body = parseBody(request);
+    const source = typeof body.source === "string" ? body.source.trim() : "";
+    if (!source) return reply.code(400).send({ error: "Missing source" });
+    const label = typeof body.label === "string" ? body.label : undefined;
+    const coverUrl = typeof body.coverUrl === "string" ? body.coverUrl : undefined;
+    const target = await resolveTarget(me.userId, body, reply);
+    if (!target) return; // resolveTarget already replied (409)
+    const { guildId } = target;
+    const epochAtStart = getEpoch(guildId);
+    const { tracks } = await resolveEntriesToTracks(
+      [{ source, label, coverUrl }],
+      me.userId,
+    );
+    if (tracks.length === 0) {
+      return reply
+        .code(409)
+        .send({ error: "This track couldn't be played right now." });
+    }
+    await stampQueuedBy(tracks, me.userId, guildId);
+    const status = (await runtime()
+      .voice.status(guildId)
+      .catch(() => null)) as { playing?: boolean } | null;
+    const coldStart = !status?.playing;
+    if (coldStart && !(await joinOr409(target, me.userId, reply))) return;
+    return withGuildLock(guildId, async () => {
+      if (getEpoch(guildId) !== epochAtStart) {
+        return reply.code(409).send({ error: "Session changed — retry." });
+      }
+      keepAdvancing(guildId);
+      for (const t of tracks) enqueue(guildId, t);
+      if (coldStart) await doNext(guildId);
+      await nowPlaying.sync(guildId).catch(() => null);
+      return { ok: true, guildId };
+    });
+  });
+
   // ── API keys (self-service; scoped to the caller) ───────────────────
   server.get("/api/me/keys", async (request, reply) => {
     const me = authPersonal(request, reply);
