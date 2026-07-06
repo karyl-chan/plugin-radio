@@ -134,18 +134,24 @@ export async function doJump(
   return { kind: "play-failed", track: candidate.track };
 }
 
-/** Stop playback, clear the queue, leave voice. */
-export async function doStop(guildId: string): Promise<void> {
+/**
+ * Stop playback + leave voice, tolerating either op rejecting. Running them
+ * together races on the voice service — `leave` disconnects, then the
+ * concurrent `stop` errors "not connected" (a 500 back through voice.stop) —
+ * and either can reject when the session is already gone. Callers must still
+ * clear their local state regardless, so a voice-op rejection must NOT throw:
+ * `Promise.allSettled` (previously `Promise.all` here 500-ed the WebUI /stop
+ * and left the UI stuck showing "playing"). Callers layer their own state
+ * cleanup (full `reset` vs. `resetQueue` keeping settings) on top.
+ */
+export async function stopAndLeaveVoice(guildId: string): Promise<void> {
   const voice = runtime().voice;
-  // stop + leave, tolerating either rejecting. Running them in parallel
-  // races on the voice service — `leave` disconnects, then the concurrent
-  // `stop` errors "not connected" (a 500 back through voice.stop) — and
-  // either can reject when the session is already gone. A stop must still
-  // clear local state + refresh the snapshot regardless, so a voice-op
-  // rejection must NOT throw the whole stop. Previously `Promise.all` let it
-  // throw, 500-ing the WebUI /stop and leaving the UI stuck showing
-  // "playing".
   await Promise.allSettled([voice.stop(guildId), voice.leave(guildId)]);
+}
+
+/** Stop playback, leave voice, and drop the whole session state. */
+export async function doStop(guildId: string): Promise<void> {
+  await stopAndLeaveVoice(guildId);
   reset(guildId);
 }
 

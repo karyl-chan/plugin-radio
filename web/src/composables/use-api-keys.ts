@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import { api } from "../api";
 import { useToast } from "./use-toast";
+import { useBusy } from "./use-busy";
 import type { ApiKey } from "../types";
 
 /**
@@ -17,7 +18,7 @@ export function useApiKeys(baseUrl: string) {
   const newKeyLabel = ref("");
   const creatingKey = ref(false);
   // Ids whose revoke DELETE is in flight — drives the per-row Revoke spinner.
-  const revokingKeyIds = ref<Set<string>>(new Set());
+  const { busyKeys: revokingKeyIds, run: runRevoke } = useBusy();
   // One-time plaintext returned by a create call — shown in a reveal banner
   // until dismissed, since it's unrecoverable afterwards.
   const freshKey = ref<string | null>(null);
@@ -53,18 +54,15 @@ export function useApiKeys(baseUrl: string) {
       !confirm(`Revoke API key "${k.label || k.id}"? Integrations using it stop working.`)
     )
       return;
-    revokingKeyIds.value = new Set(revokingKeyIds.value).add(k.id);
-    try {
-      await api("DELETE", `${baseUrl}/${encodeURIComponent(k.id)}`);
-      ok("Revoked");
-      await loadKeys();
-    } catch (e: any) {
-      error(e.message);
-    } finally {
-      const next = new Set(revokingKeyIds.value);
-      next.delete(k.id);
-      revokingKeyIds.value = next;
-    }
+    await runRevoke(k.id, async () => {
+      try {
+        await api("DELETE", `${baseUrl}/${encodeURIComponent(k.id)}`);
+        ok("Revoked");
+        await loadKeys();
+      } catch (e: any) {
+        error(e.message);
+      }
+    });
   }
 
   async function copyFreshKey(): Promise<void> {

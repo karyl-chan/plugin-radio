@@ -43,7 +43,7 @@ import { doNext } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import { runtime } from "./runtime.js";
-import { resolveViewer, NP_SYNTHETIC_PREFIX } from "./viewer.js";
+import { resolveViewer, isAnonymousViewer } from "./viewer.js";
 
 export function registerPersonalRoutes(
   server: FastifyInstance,
@@ -108,7 +108,7 @@ export function registerPersonalRoutes(
       reply.code(401).send({ error: "Invalid or expired token" });
       return null;
     }
-    if (claims.userId.startsWith(NP_SYNTHETIC_PREFIX)) {
+    if (isAnonymousViewer(claims.userId)) {
       reply.code(403).send({ error: "This link isn't valid for a personal page." });
       return null;
     }

@@ -252,13 +252,9 @@ export async function resolveEntriesToTracks(
       const downloaded = await findBySourceUrl(source);
       resolved = downloaded
         ? libraryTrackToTrack(downloaded, userId)
-        : {
-            url: source,
-            label: entry.label ?? source,
-            queuedBy: userId,
-            needsResolve: true,
-            ...(cover ? { coverUrl: cover } : {}),
-          };
+        : // A bare lazy Track — the shared enrichment block below fills in the
+          // cached label + cover uniformly for every branch.
+          { url: source, label: source, queuedBy: userId, needsResolve: true };
     } else {
       try {
         resolved = await resolveAnyTrack(source, userId);

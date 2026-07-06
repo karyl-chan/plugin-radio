@@ -19,6 +19,7 @@ import {
   resolveAutoplayRecommendations,
   youtubeVideoIdOf,
 } from "./resolver.js";
+import { stopAndLeaveVoice } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
 import { runtime, type BotRpc } from "./runtime.js";
@@ -225,8 +226,7 @@ async function endAndLeave(
   // shuffle): clear only the queue (resetQueue) and mark the session ended,
   // rather than deleting the whole state (doStop). A later re-queue then
   // resumes with the member's preferences instead of falling back to defaults.
-  const voice = runtime().voice;
-  await Promise.allSettled([voice.stop(guildId), voice.leave(guildId)]);
+  await stopAndLeaveVoice(guildId);
   resetQueue(guildId);
   endSession(guildId);
   await nowPlaying.teardown(guildId).catch(() => {});

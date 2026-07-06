@@ -88,7 +88,7 @@ import {
 } from "./playlists.js";
 import { listUserFavorites } from "./user-favorites.js";
 import { listUserPlaylists } from "./user-playlists.js";
-import { resolveViewer, NP_SYNTHETIC_PREFIX } from "./viewer.js";
+import { resolveViewer, isAnonymousViewer } from "./viewer.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const MANAGE_CAP = "manage";
@@ -855,7 +855,7 @@ export async function registerWebRoutes(
       const q = rawQ.toLowerCase();
       const hit = (...vals: (string | undefined)[]): boolean =>
         !q || vals.some((v) => v?.toLowerCase().includes(q));
-      const loggedIn = !claims.userId.startsWith(NP_SYNTHETIC_PREFIX);
+      const loggedIn = !isAnonymousViewer(claims.userId);
 
       type Suggestion = {
         type: "user-playlist" | "favorite" | "public-playlist" | "library";
@@ -1242,7 +1242,7 @@ export async function registerWebRoutes(
         // A synthetic public now-playing viewer (radio-np:) isn't a real
         // Discord user the bot can locate, so a cold-start join can't work —
         // don't attempt it with a bogus id; say so plainly instead.
-        if (claims.userId.startsWith(NP_SYNTHETIC_PREFIX)) {
+        if (isAnonymousViewer(claims.userId)) {
           return reply.code(409).send({
             error:
               "The bot isn't in a voice channel — ask someone in the server to start playback.",

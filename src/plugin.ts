@@ -139,30 +139,44 @@ function clearGuildSessionTokens(guildId: string): void {
 // real Discord id, so they're cached per user rather than per guild.
 const personalTokens = new Map<string, CachedToken>();
 
-async function getSessionToken(
+/** Cache-with-refresh-margin around the bot's `auth.session` mint. The caller
+ *  supplies the `map` + cache `key` (per (guild,user) for guild session tokens,
+ *  per user for guildless personal tokens) and the exact RPC `body` — a
+ *  personal token is just a guild session token minted without `guild_id`. */
+async function mintCachedToken(
   botRpc: BotRpcFn,
-  userId: string,
-  guildId: string,
+  map: Map<string, CachedToken>,
+  key: string,
+  body: Record<string, unknown>,
 ): Promise<string | null> {
-  const key = sessionCacheKey(guildId, userId);
-  const cached = sessionTokens.get(key);
+  const cached = map.get(key);
   if (
     cached &&
     cached.expiresAt - Date.now() > SESSION_TOKEN_REFRESH_MARGIN_MS
   ) {
     return cached.token;
   }
-  const res = (await botRpc("/api/plugin/auth.session", {
-    user_id: userId,
-    kind: "session",
-    guild_id: guildId,
-  })) as { token?: string; expiresAt?: number } | null;
+  const res = (await botRpc("/api/plugin/auth.session", body)) as
+    | { token?: string; expiresAt?: number }
+    | null;
   if (!res || typeof res.token !== "string") return null;
-  sessionTokens.set(key, {
+  map.set(key, {
     token: res.token,
     expiresAt: typeof res.expiresAt === "number" ? res.expiresAt : Date.now(),
   });
   return res.token;
+}
+
+async function getSessionToken(
+  botRpc: BotRpcFn,
+  userId: string,
+  guildId: string,
+): Promise<string | null> {
+  return mintCachedToken(botRpc, sessionTokens, sessionCacheKey(guildId, userId), {
+    user_id: userId,
+    kind: "session",
+    guild_id: guildId,
+  });
 }
 
 /** WebUI session URL for a guild, or null if a token couldn't be minted. */
@@ -183,24 +197,11 @@ async function getPersonalToken(
   botRpc: BotRpcFn,
   userId: string,
 ): Promise<string | null> {
-  const cached = personalTokens.get(userId);
-  if (
-    cached &&
-    cached.expiresAt - Date.now() > SESSION_TOKEN_REFRESH_MARGIN_MS
-  ) {
-    return cached.token;
-  }
-  const res = (await botRpc("/api/plugin/auth.session", {
+  return mintCachedToken(botRpc, personalTokens, userId, {
     user_id: userId,
     kind: "session",
     // no guild_id → guildId: null in the minted token
-  })) as { token?: string; expiresAt?: number } | null;
-  if (!res || typeof res.token !== "string") return null;
-  personalTokens.set(userId, {
-    token: res.token,
-    expiresAt: typeof res.expiresAt === "number" ? res.expiresAt : Date.now(),
   });
-  return res.token;
 }
 
 /** Personal-page WebUI URL for a member, or null if a token couldn't be minted. */

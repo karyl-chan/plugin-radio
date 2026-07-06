@@ -15,7 +15,6 @@ import type { UserFavorite } from "../types";
 export function useFavorites() {
   const { ok, error } = useToast();
   const favorites = ref<UserFavorite[]>([]);
-  const loaded = ref(false);
   const sourceSet = computed(
     () => new Set(favorites.value.map((f) => f.source)),
   );
@@ -27,14 +26,9 @@ export function useFavorites() {
         "/api/me/favorites",
       );
       favorites.value = r.favorites || [];
-      loaded.value = true;
     } catch (e: any) {
       error(e.message);
     }
-  }
-
-  function isFavorited(source: string | null | undefined): boolean {
-    return !!source && sourceSet.value.has(source);
   }
 
   /** Star/unstar a source. Reconciles the local list from the server's
@@ -76,5 +70,5 @@ export function useFavorites() {
     }
   }
 
-  return { favorites, sourceSet, loaded, load, isFavorited, toggle, remove };
+  return { favorites, sourceSet, load, toggle, remove };
 }

@@ -39,7 +39,9 @@ const pendingAdds = ref<string[]>([]);
 const addText = ref("");
 const showSuggestions = ref(false);
 const savingPlaylist = ref(false);
-const adding = ref(false);
+// The + Add button spins whenever any enqueue is in flight — exactly when the
+// pending-add list is non-empty, so derive it rather than hand-syncing a flag.
+const adding = computed(() => pendingAdds.value.length > 0);
 
 // Per-button transition state (press → API response). `controlBusy` keys the
 // NowPlayingCard buttons (prev/pause/…); `favToggleBusy` keys the ☆ toggles
@@ -103,15 +105,11 @@ async function withPendingAdd(
   addText.value = "";
   showSuggestions.value = false;
   pendingAdds.value.push(shown);
-  adding.value = true;
   try {
     await run();
   } finally {
     const i = pendingAdds.value.indexOf(shown);
     if (i !== -1) pendingAdds.value.splice(i, 1);
-    // Keep the button spinning only while an add is genuinely in flight
-    // (a second add can overlap the first via the autocomplete).
-    if (pendingAdds.value.length === 0) adding.value = false;
   }
 }
 

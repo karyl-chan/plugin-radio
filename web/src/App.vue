@@ -10,6 +10,10 @@ import { setApi, api } from "./api";
 import type { ViewerProfile } from "./types";
 
 const PLUGIN_KEY = "karyl-radio";
+// Synthetic public now-playing viewer id prefix — mirrors the backend's
+// NP_SYNTHETIC_PREFIX (viewer.ts). Anonymous: no chip, no ☆/Save, barred
+// from /me. Kept as one constant so the three checks can't desync.
+const NP_PREFIX = "radio-np:";
 
 type View = "loading" | "denied" | "session" | "manage" | "personal";
 const view = ref<View>("loading");
@@ -44,7 +48,7 @@ async function loadViewer(
 ): Promise<void> {
   // The public now-playing embed token carries a synthetic radio-np: user
   // — anonymous, no chip. (The server enforces this too.)
-  if (userId && userId.startsWith("radio-np:")) return;
+  if (userId && userId.startsWith(NP_PREFIX)) return;
   try {
     const path =
       mode === "session" ? `/api/session/${guildId}/viewer` : "/api/me";
@@ -92,7 +96,7 @@ async function bootstrap(): Promise<void> {
   // what lets /me and the player page share one login. Only the synthetic
   // public now-playing user is barred (backend enforces this too).
   if (wantsPersonal) {
-    if (handle.claims?.userId?.startsWith("radio-np:")) {
+    if (handle.claims?.userId?.startsWith(NP_PREFIX)) {
       deny("This link isn't valid for a personal page.");
       return;
     }
@@ -123,7 +127,7 @@ async function bootstrap(): Promise<void> {
   if (typeof handle.claims.guildId === "string") {
     sessionGuildId.value = handle.claims.guildId;
     const uid = handle.claims.userId;
-    loggedIn.value = !!uid && !uid.startsWith("radio-np:");
+    loggedIn.value = !!uid && !uid.startsWith(NP_PREFIX);
     view.value = "session";
     void loadViewer("session", handle.claims.guildId, handle.claims.userId);
     return;
