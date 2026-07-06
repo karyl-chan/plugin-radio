@@ -294,6 +294,48 @@ export function registerPersonalRoutes(
     });
   });
 
+  // Append a personal playlist's tracks to the member's current voice queue
+  // (cold-starts if idle). The append sibling of /play — same resolution,
+  // but mirrors POST /api/me/favorites/:id/queue: don't reset, join+start
+  // only when nothing's already playing. Powers the player's add-to-queue
+  // autocomplete when a user playlist is picked.
+  server.post("/api/me/playlists/:id/queue", async (request, reply) => {
+    const me = authPersonal(request, reply);
+    if (!me) return;
+    const { id } = request.params as { id: string };
+    const pl = await getUserPlaylist(id, me.userId);
+    if (!pl) return reply.code(404).send({ error: "Not found" });
+    if (pl.entries.length === 0) {
+      return reply.code(409).send({ error: "This playlist is empty." });
+    }
+    const target = await resolveTarget(me.userId, parseBody(request), reply);
+    if (!target) return; // resolveTarget already replied (409)
+    const { tracks } = await resolveEntriesToTracks(pl.entries, me.userId, pl.id);
+    if (tracks.length === 0) {
+      return reply
+        .code(409)
+        .send({ error: "None of this playlist's entries could be played right now." });
+    }
+    const { guildId } = target;
+    await stampQueuedBy(tracks, me.userId, guildId);
+    const status = (await runtime()
+      .voice.status(guildId)
+      .catch(() => null)) as { playing?: boolean } | null;
+    const coldStart = !status?.playing;
+    if (coldStart && !(await joinOr409(target, me.userId, reply))) return;
+    const epochAtStart = getEpoch(guildId);
+    return withGuildLock(guildId, async () => {
+      if (getEpoch(guildId) !== epochAtStart) {
+        return reply.code(409).send({ error: "Session changed — retry." });
+      }
+      keepAdvancing(guildId);
+      for (const t of tracks) enqueue(guildId, t);
+      if (coldStart) await doNext(guildId);
+      await nowPlaying.sync(guildId).catch(() => null);
+      return { ok: true, guildId };
+    });
+  });
+
   // ── API keys (self-service; scoped to the caller) ───────────────────
   server.get("/api/me/keys", async (request, reply) => {
     const me = authPersonal(request, reply);

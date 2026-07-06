@@ -86,7 +86,9 @@ import {
   type Playlist,
   type PlaylistPatch,
 } from "./playlists.js";
-import { resolveViewer } from "./viewer.js";
+import { listUserFavorites } from "./user-favorites.js";
+import { listUserPlaylists } from "./user-playlists.js";
+import { resolveViewer, NP_SYNTHETIC_PREFIX } from "./viewer.js";
 
 /** capability key (plugin-local) that gates the admin/manage WebUI routes. */
 const MANAGE_CAP = "manage";
@@ -823,6 +825,104 @@ export async function registerWebRoutes(
       const claims = authSession(request, reply, guildId);
       if (!claims) return;
       return { viewer: await resolveViewer(claims.userId, guildId) };
+    },
+  );
+
+  // Add-to-queue autocomplete. One priority-ordered, capped list merged from
+  // four sources so the player box can suggest more than just favorites:
+  //   1. the viewer's own playlists   2. their favorites
+  //   3. public (admin) playlists     4. the music library
+  // The session token carries the real userId when logged in (via /me →
+  // Open player), so sources 1–2 come straight from that id — no personal
+  // token needed. Anonymous (radio-np:) viewers get only the public
+  // sources (3–4), which is all their token can act on anyway. Each item
+  // carries what the client needs to enqueue it: `source` (fed to the
+  // existing /queue route — a favorite key, a public-playlist *name* that
+  // resolveStoredPlaylist expands, or a library track id) or `playlistId`
+  // (a user playlist → POST /api/me/playlists/:id/queue).
+  server.get<{ Params: { guildId: string }; Querystring: { q?: string } }>(
+    "/api/session/:guildId/queue-suggestions",
+    async (request, reply) => {
+      const { guildId } = request.params;
+      const claims = authSession(request, reply, guildId);
+      if (!claims) return;
+      const LIMIT = 10;
+      const rawQ = (request.query?.q ?? "").trim();
+      const q = rawQ.toLowerCase();
+      const hit = (...vals: (string | undefined)[]): boolean =>
+        !q || vals.some((v) => v?.toLowerCase().includes(q));
+      const loggedIn = !claims.userId.startsWith(NP_SYNTHETIC_PREFIX);
+
+      type Suggestion = {
+        type: "user-playlist" | "favorite" | "public-playlist" | "library";
+        label: string;
+        coverUrl?: string;
+        sub?: string;
+        source?: string;
+        playlistId?: string;
+      };
+      const out: Suggestion[] = [];
+      const tracksLabel = (n: number): string =>
+        n === 1 ? "1 track" : `${n} tracks`;
+
+      // 1. the viewer's own playlists (logged in only)
+      const favSources = new Set<string>();
+      if (loggedIn) {
+        for (const p of await listUserPlaylists(claims.userId)) {
+          if (out.length >= LIMIT) break;
+          if (!hit(p.name, p.description)) continue;
+          const cover = p.entries.find((e) => e.coverUrl)?.coverUrl;
+          out.push({
+            type: "user-playlist",
+            label: p.name,
+            sub: tracksLabel(p.entries.length),
+            playlistId: p.id,
+            ...(cover ? { coverUrl: cover } : {}),
+          });
+        }
+        // 2. the viewer's favorites (record every source for library dedup)
+        for (const f of listUserFavorites(claims.userId)) {
+          favSources.add(f.source);
+          if (out.length >= LIMIT || !hit(f.label, f.source)) continue;
+          out.push({
+            type: "favorite",
+            label: f.label,
+            source: f.source,
+            ...(f.coverUrl ? { coverUrl: f.coverUrl } : {}),
+          });
+        }
+      }
+      // 3. public (admin-curated) playlists — queued by name via the
+      //    existing /queue route (resolveStoredPlaylist expands them).
+      if (out.length < LIMIT) {
+        for (const p of await listPlaylists()) {
+          if (out.length >= LIMIT) break;
+          if (!hit(p.name, p.description)) continue;
+          out.push({
+            type: "public-playlist",
+            label: p.name,
+            sub: tracksLabel(p.entries.length),
+            source: p.name,
+          });
+        }
+      }
+      // 4. the music library (searchTracks does its own matching); skip
+      //    tracks already surfaced as a favorite so they don't double up.
+      if (out.length < LIMIT) {
+        for (const t of await searchTracks(rawQ)) {
+          if (out.length >= LIMIT) break;
+          if (favSources.has(t.id)) continue;
+          const sub = [t.author, t.album].filter(Boolean).join(" · ");
+          out.push({
+            type: "library",
+            label: t.title,
+            source: t.id,
+            ...(t.coverUrl ? { coverUrl: t.coverUrl } : {}),
+            ...(sub ? { sub } : {}),
+          });
+        }
+      }
+      return { suggestions: out };
     },
   );
 

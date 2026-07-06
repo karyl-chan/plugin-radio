@@ -28,6 +28,27 @@ export interface Track {
 export type LoopMode = "off" | "track" | "queue";
 
 /**
+ * One add-to-queue autocomplete row, from GET
+ * /api/session/:id/queue-suggestions. Merged + priority-ordered server-side
+ * across the viewer's playlists, their favorites, public playlists and the
+ * library. `source` items enqueue through the normal /queue route
+ * (`addSource`); a `playlistId` item is a user playlist appended via
+ * POST /api/me/playlists/:id/queue.
+ */
+export interface QueueSuggestion {
+  type: "user-playlist" | "favorite" | "public-playlist" | "library";
+  label: string;
+  coverUrl?: string;
+  /** Secondary line — e.g. "12 tracks" or "author · album". */
+  sub?: string;
+  /** Enqueue key for the /queue route (favorite / public-playlist name /
+   *  library track id). Mutually exclusive with `playlistId`. */
+  source?: string;
+  /** User playlist id → appended via its own /queue endpoint. */
+  playlistId?: string;
+}
+
+/**
  * Mirror of the server's LibraryTrack (src/library.ts) — kept here as
  * its own copy so the WebUI bundle doesn't reach across into the
  * server source tree. Drift between the two will surface in the

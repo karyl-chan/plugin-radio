@@ -9,16 +9,20 @@ import { useToast } from "../composables/use-toast";
 import { useFavorites } from "../composables/use-favorites";
 import { useBusy } from "../composables/use-busy";
 import { trackKey } from "../composables/use-format";
-import type { LoopMode, SessionSnapshot, Track, UserFavorite } from "../types";
+import type {
+  LoopMode,
+  QueueSuggestion,
+  SessionSnapshot,
+  Track,
+} from "../types";
 
 const props = defineProps<{ guildId: string; loggedIn?: boolean }>();
 const { ok, error } = useToast();
 
-// Favorites (login-gated): the ☆ toggle on queue rows + the add-to-queue
-// autocomplete. Identity resolves async, so load when loggedIn flips true.
+// Favorites (login-gated): drives the ☆ toggle on queue rows (membership +
+// star/unstar). Identity resolves async, so load when loggedIn flips true.
 const {
   sourceSet: favoriteSources,
-  favorites,
   load: loadFavorites,
   toggle: toggleFavoriteSource,
 } = useFavorites();
@@ -88,48 +92,132 @@ async function act(
   else await call();
 }
 
-async function addSource(raw: string): Promise<void> {
-  const v = raw.trim();
-  if (!v) return;
+// Shared "adding…" placeholder lifecycle: shows `shown` as a pending row and
+// keeps the + Add button spinning while the enqueue is in flight. `shown` is
+// a display label (not the raw source), so a picked library track reads as
+// its title rather than a bare id.
+async function withPendingAdd(
+  shown: string,
+  run: () => Promise<void>,
+): Promise<void> {
   addText.value = "";
   showSuggestions.value = false;
-  pendingAdds.value.push(v);
+  pendingAdds.value.push(shown);
   adding.value = true;
   try {
-    snap.value = await api<SessionSnapshot>(
-      "POST",
-      sessionPath("/queue"),
-      { source: v },
-    );
-    ok("Queued");
-  } catch (e: any) {
-    error(e.message || "Add failed");
+    await run();
   } finally {
-    const i = pendingAdds.value.indexOf(v);
+    const i = pendingAdds.value.indexOf(shown);
     if (i !== -1) pendingAdds.value.splice(i, 1);
     // Keep the button spinning only while an add is genuinely in flight
     // (a second add can overlap the first via the autocomplete).
     if (pendingAdds.value.length === 0) adding.value = false;
   }
 }
+
+async function addSource(raw: string, displayLabel?: string): Promise<void> {
+  const v = raw.trim();
+  if (!v) return;
+  await withPendingAdd(displayLabel ?? v, async () => {
+    try {
+      snap.value = await api<SessionSnapshot>(
+        "POST",
+        sessionPath("/queue"),
+        { source: v },
+      );
+      ok("Queued");
+    } catch (e: any) {
+      error(e.message || "Add failed");
+    }
+  });
+}
 function add(): void {
   void addSource(addText.value);
 }
 
-// ── favorites autocomplete for the Add box (top 10, filtered) ────────
-const filteredFavorites = computed<UserFavorite[]>(() => {
-  const q = addText.value.trim().toLowerCase();
-  const list = q
-    ? favorites.value.filter(
-        (f) =>
-          f.label.toLowerCase().includes(q) ||
-          f.source.toLowerCase().includes(q),
-      )
-    : favorites.value;
-  return list.slice(0, 10);
+// ── add-to-queue autocomplete: server-merged suggestions (top 10) ────
+// One priority-ordered list across the viewer's playlists → favorites →
+// public playlists → library, filtered server-side by the current input.
+const suggestions = ref<QueueSuggestion[]>([]);
+let suggestTimer: number | undefined;
+// Monotonic request id — a slower earlier fetch must not clobber a newer
+// one's results (responses can arrive out of order across keystroke bursts).
+let suggestSeq = 0;
+
+async function fetchSuggestions(): Promise<void> {
+  const seq = ++suggestSeq;
+  try {
+    const r = await api<{ suggestions: QueueSuggestion[] }>(
+      "GET",
+      sessionPath("/queue-suggestions") +
+        "?q=" +
+        encodeURIComponent(addText.value.trim()),
+    );
+    if (seq !== suggestSeq) return; // superseded by a newer fetch
+    suggestions.value = r.suggestions || [];
+  } catch {
+    if (seq === suggestSeq) suggestions.value = [];
+  }
+}
+function scheduleSuggest(): void {
+  if (suggestTimer !== undefined) window.clearTimeout(suggestTimer);
+  suggestTimer = window.setTimeout(fetchSuggestions, 150);
+}
+watch(addText, () => {
+  if (showSuggestions.value) scheduleSuggest();
 });
-function pickFavorite(f: UserFavorite): void {
-  void addSource(f.source);
+
+const SUGGEST_HEADER: Record<QueueSuggestion["type"], string> = {
+  "user-playlist": "Your playlists",
+  favorite: "★ Favorites",
+  "public-playlist": "Public playlists",
+  library: "Library",
+};
+function suggestIcon(type: QueueSuggestion["type"]): string {
+  return type === "favorite" ? "★" : "🎵";
+}
+// Group the (already priority-ordered) list into contiguous type sections so
+// the dropdown can show a header per source. Headers don't count toward the 10.
+const groupedSuggestions = computed(() => {
+  const groups: {
+    type: QueueSuggestion["type"];
+    header: string;
+    items: QueueSuggestion[];
+  }[] = [];
+  for (const s of suggestions.value) {
+    let g = groups[groups.length - 1];
+    if (!g || g.type !== s.type) {
+      g = { type: s.type, header: SUGGEST_HEADER[s.type], items: [] };
+      groups.push(g);
+    }
+    g.items.push(s);
+  }
+  return groups;
+});
+
+function pickSuggestion(item: QueueSuggestion): void {
+  if (item.playlistId) {
+    const id = item.playlistId;
+    void withPendingAdd(item.label, async () => {
+      try {
+        await api(
+          "POST",
+          "/api/me/playlists/" + encodeURIComponent(id) + "/queue",
+          { guildId: props.guildId },
+        );
+        ok(`Queued "${item.label}"`);
+        await refresh();
+      } catch (e: any) {
+        error(e.message || "Couldn't queue that playlist");
+      }
+    });
+  } else if (item.source) {
+    void addSource(item.source, item.label);
+  }
+}
+function onAddFocus(): void {
+  showSuggestions.value = true;
+  void fetchSuggestions();
 }
 function hideSuggestionsSoon(): void {
   // Delay so a suggestion mousedown/click registers before the blur hides it.
@@ -258,6 +346,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   if (timer !== undefined) clearInterval(timer);
+  if (suggestTimer !== undefined) window.clearTimeout(suggestTimer);
 });
 </script>
 
@@ -283,23 +372,28 @@ onUnmounted(() => {
             v-model="addText"
             class="add-input"
             placeholder="Add to queue — station key / library title / http(s) URL"
-            @focus="showSuggestions = true"
+            @focus="onAddFocus"
             @blur="hideSuggestionsSoon"
           />
           <ul
-            v-if="loggedIn && showSuggestions && filteredFavorites.length > 0"
+            v-if="showSuggestions && suggestions.length > 0"
             class="suggestions"
           >
-            <li class="suggestions-head">★ Favorites</li>
-            <li
-              v-for="f in filteredFavorites"
-              :key="f.id"
-              class="suggestion"
-              @mousedown.prevent="pickFavorite(f)"
-            >
-              <Thumb :src="f.coverUrl" />
-              <span class="suggestion-label">{{ f.label }}</span>
-            </li>
+            <template v-for="g in groupedSuggestions" :key="g.type">
+              <li class="suggestions-head">{{ g.header }}</li>
+              <li
+                v-for="(item, i) in g.items"
+                :key="g.type + ':' + (item.source ?? item.playlistId ?? i)"
+                class="suggestion"
+                @mousedown.prevent="pickSuggestion(item)"
+              >
+                <Thumb :src="item.coverUrl" :placeholder="suggestIcon(item.type)" />
+                <div class="suggestion-info">
+                  <span class="suggestion-label">{{ item.label }}</span>
+                  <span v-if="item.sub" class="suggestion-sub">{{ item.sub }}</span>
+                </div>
+              </li>
+            </template>
           </ul>
         </div>
         <AppButton type="submit" :loading="adding">+ Add</AppButton>
@@ -389,13 +483,24 @@ onUnmounted(() => {
   cursor: pointer;
 }
 .suggestion:hover { background: var(--bg-surface-hover); }
-.suggestion-label {
+.suggestion-info {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.suggestion-label {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 0.9rem;
+}
+.suggestion-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 .playlist-scroll {
   flex: 1;
