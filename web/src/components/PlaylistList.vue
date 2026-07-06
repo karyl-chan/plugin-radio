@@ -105,6 +105,13 @@ function bindSortable() {
     filter: ".no-drag",
     preventOnFilter: false,
     animation: 150,
+    // Auto-scroll the enclosing scroll container (.playlist-scroll) when the
+    // drag nears its top/bottom edge, so a long queue can be reordered across
+    // a big distance without letting go. bubbleScroll reaches the ancestor.
+    scroll: true,
+    bubbleScroll: true,
+    scrollSensitivity: 80,
+    scrollSpeed: 14,
     ghostClass: "drag-ghost",
     chosenClass: "drag-chosen",
     dragClass: "drag-active",

@@ -232,6 +232,12 @@ function bindSortable(): void {
   sortable = Sortable.create(listEl.value, {
     handle: ".drag-handle",
     animation: 150,
+    // Auto-scroll the entry list when the drag nears its top/bottom edge so a
+    // long playlist can be reordered without manually scrolling mid-drag.
+    scroll: true,
+    bubbleScroll: true,
+    scrollSensitivity: 80,
+    scrollSpeed: 14,
     ghostClass: "drag-ghost",
     onEnd: (evt) => {
       const from = evt.oldIndex ?? -1;
