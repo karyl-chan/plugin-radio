@@ -202,6 +202,29 @@ type VoiceStatus = {
 };
 
 /**
+ * End a session that has nothing left to play (queue drained, not looping)
+ * or whose channel emptied: stop playback, LEAVE the voice channel, and drop
+ * all per-guild advance state. This is what makes the bot auto-leave when a
+ * playlist finishes — an idle session previously only tore down its
+ * now-playing card and left the bot sitting silently in the channel. Runs
+ * under the caller's guild lock; `doStop` tolerates an already-gone voice
+ * connection, so it's safe even if the bot was disconnected externally.
+ */
+async function endAndLeave(
+  guildId: string,
+  seenGuilds: Set<string>,
+  log: Logger,
+  reason: string,
+): Promise<void> {
+  log.info(`advance: ${reason} — leaving voice`, { guildId });
+  seenGuilds.delete(guildId);
+  prefetched.delete(guildId);
+  lastListenerAt.delete(guildId);
+  await doStop(guildId).catch(() => {});
+  await nowPlaying.teardown(guildId).catch(() => {});
+}
+
+/**
  * Phase 1 (under lock): early-exit checks + claim an autoplay seed
  * if eligible. Returns `{ status, seedId }` for Phase 2; null tells
  * the caller to terminate this tick.
@@ -213,9 +236,10 @@ async function probePhase(
 ): Promise<{ status: VoiceStatus; seedId: string | null } | null> {
   return withGuildLock(guildId, async () => {
     if (isIdle(guildId)) {
-      seenGuilds.delete(guildId);
-      prefetched.delete(guildId);
-      await nowPlaying.teardown(guildId).catch(() => {});
+      // Queue drained / manually skipped past the end → the bot should
+      // leave, not linger silently. (A drain via doNext leaves the guild in
+      // seenGuilds, so this tick catches it.)
+      await endAndLeave(guildId, seenGuilds, log, "queue finished");
       return null;
     }
     const status = (await runtime()
@@ -242,15 +266,12 @@ async function probePhase(
     if (status.listeners === 0) {
       const since = lastListenerAt.get(guildId);
       if (since !== undefined && now - since > EMPTY_CHANNEL_STOP_MS) {
-        log.info(
-          "advance: voice channel empty for >1min — stopping session",
-          { guildId },
+        await endAndLeave(
+          guildId,
+          seenGuilds,
+          log,
+          "voice channel empty for >1min",
         );
-        seenGuilds.delete(guildId);
-        prefetched.delete(guildId);
-        lastListenerAt.delete(guildId);
-        await doStop(guildId).catch(() => {});
-        await nowPlaying.teardown(guildId).catch(() => {});
         return null;
       }
       if (since === undefined) lastListenerAt.set(guildId, now);
@@ -316,13 +337,11 @@ async function advancePhase(
         endSession(guildId);
       }
     }
-    // The advance above may have drained the queue — if so, the
-    // session is done: tear down rather than flashing a "nothing
-    // playing" card.
+    // The advance above may have drained the queue — if so the session
+    // is finished: stop playback and leave the voice channel (not just
+    // tear down the now-playing card and sit there idle).
     if (isIdle(guildId)) {
-      seenGuilds.delete(guildId);
-      prefetched.delete(guildId);
-      await nowPlaying.teardown(guildId).catch(() => {});
+      await endAndLeave(guildId, seenGuilds, log, "queue finished");
       return;
     }
     // Pre-resolve the (new) next-up track so the next hand-off is
