@@ -5,16 +5,18 @@ import { AppButton, AppModal } from "@karyl-chan/ui";
 import Thumb from "./Thumb.vue";
 import { api } from "../api";
 import { useToast } from "../composables/use-toast";
-import type { LibraryTrack, PlaylistEntryInfo } from "../types";
+import type { LibraryTrack, PlaylistEntry, PlaylistEntryInfo } from "../types";
 
 /** The fields this modal actually touches — shared by the manager-owned
  *  Playlist and the per-user UserPlaylist, so the modal stays agnostic to
- *  which tier (manage vs. personal) it's editing. */
+ *  which tier (manage vs. personal) it's editing. Manage entries are bare
+ *  source strings; personal entries are objects carrying cached display
+ *  meta (title + cover) that the modal preserves across an edit. */
 interface EditablePlaylist {
   id: string;
   name: string;
   description?: string;
-  entries: string[];
+  entries: Array<string | PlaylistEntry>;
 }
 
 const props = withDefaults(
@@ -59,9 +61,17 @@ const { ok, error } = useToast();
 // splice) while leaving the post-drag DOM order set by SortableJS —
 // the visual result was the dragged row appearing at the wrong index.
 let nextEntryUid = 1;
-interface EntryRow { uid: number; src: string }
-function wrapEntries(srcs: readonly string[]): EntryRow[] {
-  return srcs.map((src) => ({ uid: nextEntryUid++, src }));
+// `label`/`cover` are the entry's cached display meta (personal playlists
+// only) — carried through so an edit re-saves them instead of wiping them.
+interface EntryRow { uid: number; src: string; label?: string; cover?: string }
+function wrapEntries(items: ReadonlyArray<string | PlaylistEntry>): EntryRow[] {
+  return items.map((it) => {
+    const e: PlaylistEntry = typeof it === "string" ? { source: it } : it;
+    const row: EntryRow = { uid: nextEntryUid++, src: e.source };
+    if (e.label) row.label = e.label;
+    if (e.coverUrl) row.cover = e.coverUrl;
+    return row;
+  });
 }
 
 const name = ref("");
@@ -159,24 +169,29 @@ async function primePreview(source: string): Promise<void> {
   }
 }
 
-function entryLabel(source: string): string {
-  return previews.value[source]?.label ?? source;
+// Display helpers prefer the entry's cached meta (personal playlists that
+// were saved from a resolved queue track) over the on-open lookup, so a URL
+// entry shows its real title + cover instead of the raw link.
+function entryLabel(entry: EntryRow): string {
+  return entry.label ?? previews.value[entry.src]?.label ?? entry.src;
 }
 
-function entrySub(source: string): string {
-  const info = previews.value[source];
-  if (!info) return "";
-  if (info.kind === "library") {
+function entrySub(entry: EntryRow): string {
+  const info = previews.value[entry.src];
+  if (info?.kind === "library") {
     const bits = [info.author, info.album].filter(Boolean);
     return bits.length ? bits.join(" · ") : "library track";
   }
-  if (info.kind === "url") return "external URL";
-  return "raw source";
+  // Cached-meta entry (title differs from the source) → show the source.
+  if (entry.label) return entry.src;
+  if (info?.kind === "url") return "external URL";
+  if (info?.kind === "unknown") return "raw source";
+  return "";
 }
 
-function entryCover(source: string): string | undefined {
-  const info = previews.value[source];
-  return info?.kind === "library" ? info.coverUrl : undefined;
+function entryCover(entry: EntryRow): string | undefined {
+  const info = previews.value[entry.src];
+  return entry.cover ?? (info?.kind === "library" ? info.coverUrl : undefined);
 }
 
 // ── entry mutations ───────────────────────────────────────────────────
@@ -254,12 +269,22 @@ async function save(): Promise<void> {
   }
   saving.value = true;
   try {
-    const srcs = entries.value.map((e) => e.src);
+    // Personal playlists persist per-entry meta (title + cover) so a URL
+    // entry keeps its real display info; manage (global) playlists take
+    // bare source strings, so send those unchanged.
+    const payloadEntries =
+      props.mode === "personal"
+        ? entries.value.map((e) => ({
+            source: e.src,
+            ...(e.label ? { label: e.label } : {}),
+            ...(e.cover ? { coverUrl: e.cover } : {}),
+          }))
+        : entries.value.map((e) => e.src);
     if (isCreate.value) {
       await api("POST", apiBase.value, {
         name: name.value,
         description: description.value,
-        entries: srcs,
+        entries: payloadEntries,
       });
       ok("Playlist created");
     } else {
@@ -269,7 +294,7 @@ async function save(): Promise<void> {
         {
           name: name.value,
           description: description.value,
-          entries: srcs,
+          entries: payloadEntries,
         },
       );
       ok("Playlist saved");
@@ -328,10 +353,10 @@ async function save(): Promise<void> {
             :class="{ 'entry--unknown': previews[entry.src]?.kind === 'unknown' }"
           >
             <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
-            <Thumb :src="entryCover(entry.src)" />
+            <Thumb :src="entryCover(entry)" />
             <div class="entry-info">
-              <div class="entry-label">{{ entryLabel(entry.src) }}</div>
-              <div class="entry-sub">{{ entrySub(entry.src) || entry.src }}</div>
+              <div class="entry-label">{{ entryLabel(entry) }}</div>
+              <div class="entry-sub">{{ entrySub(entry) || entry.src }}</div>
             </div>
             <AppButton
               variant="ghost"

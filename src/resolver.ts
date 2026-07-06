@@ -221,31 +221,62 @@ export async function resolvePlaylist(
  * Shared by the manager-owned stored playlists (`resolveStoredPlaylist`)
  * and the per-user personal playlists (the `/me` play route).
  */
+/** An entry to resolve: a bare `source` string, or one carrying display
+ *  metadata (title + cover) cached when it was saved from a resolved queue
+ *  track. The cached meta enriches the resulting Track so a URL entry shows
+ *  its real title + cover *before* it's played, instead of the raw link
+ *  (URL entries otherwise resolve lazily — see the `needsResolve` branch). */
+export interface ResolveEntry {
+  source: string;
+  label?: string;
+  coverUrl?: string;
+}
+
 export async function resolveEntriesToTracks(
-  entries: readonly string[],
+  entries: ReadonlyArray<string | ResolveEntry>,
   userId: string | null,
   playlistId?: string,
 ): Promise<{ tracks: Track[]; skipped: string[] }> {
   const tracks: Track[] = [];
   const skipped: string[] = [];
-  for (const entry of entries) {
+  for (const raw of entries) {
+    const entry: ResolveEntry = typeof raw === "string" ? { source: raw } : raw;
+    const source = entry.source;
+    // A cover for a bare YouTube URL, derivable from the video id without a
+    // yt-dlp round-trip — so a lazily-resolved entry still shows art before
+    // it's played. Cached meta (from a favorite / saved queue track) wins.
+    const ytId = youtubeVideoIdFromUrl(source);
+    const cover = entry.coverUrl || (ytId ? youtubeThumbnailUrl(ytId) : undefined);
     let resolved: Track | null;
-    if (isHttpUrl(entry)) {
-      const downloaded = await findBySourceUrl(entry);
+    if (isHttpUrl(source)) {
+      const downloaded = await findBySourceUrl(source);
       resolved = downloaded
         ? libraryTrackToTrack(downloaded, userId)
-        : { url: entry, label: entry, queuedBy: userId, needsResolve: true };
+        : {
+            url: source,
+            label: entry.label ?? source,
+            queuedBy: userId,
+            needsResolve: true,
+            ...(cover ? { coverUrl: cover } : {}),
+          };
     } else {
       try {
-        resolved = await resolveAnyTrack(entry, userId);
+        resolved = await resolveAnyTrack(source, userId);
       } catch {
         resolved = null;
       }
     }
     if (!resolved) {
-      skipped.push(entry);
+      skipped.push(source);
       continue;
     }
+    // Enrich a bare/lazy resolve with cached meta: a lazy Track keeps the
+    // raw URL as its label — swap in the cached title; and fill a missing
+    // cover from the cache or the derived thumbnail.
+    if (entry.label && (!resolved.label || resolved.label === source)) {
+      resolved.label = entry.label;
+    }
+    if (!resolved.coverUrl && cover) resolved.coverUrl = cover;
     resolved.source = "playlist";
     if (playlistId) resolved.playlistId = playlistId;
     tracks.push(resolved);

@@ -64,17 +64,30 @@ export interface Playlist {
 }
 
 /**
+ * Mirror of the server's PlaylistEntry (src/user-playlists.ts). A personal
+ * playlist entry: a free-form `source` string plus optional display meta
+ * (title + cover) cached when it was saved from a resolved queue track, so
+ * a URL entry shows its real title + cover instead of the raw link.
+ */
+export interface PlaylistEntry {
+  source: string;
+  label?: string;
+  coverUrl?: string;
+}
+
+/**
  * Mirror of the server's UserPlaylist (src/user-playlists.ts). The
- * per-user, self-service sibling of Playlist — same shape, but owned by a
- * single member (`ownerId` instead of `createdBy`) and managed from the
- * personal page (/me) with no `manage` capability.
+ * per-user, self-service sibling of Playlist — owned by a single member
+ * (`ownerId` instead of `createdBy`) and managed from the personal page
+ * (/me) with no `manage` capability. Unlike the global Playlist, its
+ * entries carry cached display meta (see PlaylistEntry).
  */
 export interface UserPlaylist {
   id: string;
   ownerId: string;
   name: string;
   description?: string;
-  entries: string[];
+  entries: PlaylistEntry[];
   createdAt: number;
   updatedAt: number;
 }

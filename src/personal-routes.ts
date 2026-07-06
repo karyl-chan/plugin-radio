@@ -29,6 +29,7 @@ import {
 } from "./user-favorites.js";
 import {
   type UserPlaylistPatch,
+  type PlaylistEntryInput,
   addUserPlaylist,
   getUserPlaylist,
   listUserPlaylists,
@@ -37,7 +38,7 @@ import {
 } from "./user-playlists.js";
 import { resolveEntriesToTracks } from "./resolver.js";
 import { locate, resolveTarget, joinOr409 } from "./voice-target.js";
-import { resetQueue, enqueue, getEpoch } from "./queue.js";
+import { resetQueue, enqueue, getEpoch, type Track } from "./queue.js";
 import { doNext } from "./playback-actions.js";
 import { withGuildLock } from "./guild-lock.js";
 import * as nowPlaying from "./now-playing.js";
@@ -52,6 +53,21 @@ export function registerPersonalRoutes(
   const keepAdvancing = (guildId: string): void => {
     seenGuilds.add(guildId);
   };
+
+  /** Stamp the caller's display name onto freshly-resolved tracks so the
+   *  WebUI "queued by" line shows a name, not the raw user id (the slash
+   *  command sets this from ctx.userDisplayName; these routes only have the
+   *  id, so we resolve it). Best-effort — leaves `queuedBy` as the fallback
+   *  if the profile can't be fetched. Uses the guild nickname when known. */
+  async function stampQueuedBy(
+    tracks: Track[],
+    userId: string,
+    guildId: string,
+  ): Promise<void> {
+    const viewer = await resolveViewer(userId, guildId).catch(() => null);
+    if (!viewer?.displayName) return;
+    for (const t of tracks) t.queuedByName = viewer.displayName;
+  }
 
   function parseBody(request: FastifyRequest): Record<string, unknown> {
     const b = request.body;
@@ -175,7 +191,7 @@ export function registerPersonalRoutes(
         description:
           typeof body.description === "string" ? body.description : undefined,
         entries: Array.isArray(body.entries)
-          ? (body.entries as string[])
+          ? (body.entries as PlaylistEntryInput[])
           : undefined,
       });
       return { playlist };
@@ -203,7 +219,9 @@ export function registerPersonalRoutes(
     const patch: UserPlaylistPatch = {};
     if (typeof body.name === "string") patch.name = body.name;
     if (typeof body.description === "string") patch.description = body.description;
-    if (Array.isArray(body.entries)) patch.entries = body.entries as string[];
+    if (Array.isArray(body.entries)) {
+      patch.entries = body.entries as PlaylistEntryInput[];
+    }
     try {
       const playlist = await updateUserPlaylist(id, me.userId, patch);
       if (!playlist) return reply.code(404).send({ error: "Not found" });
@@ -261,6 +279,7 @@ export function registerPersonalRoutes(
         .send({ error: "None of this playlist's entries could be played right now." });
     }
     const { guildId } = target;
+    await stampQueuedBy(tracks, me.userId, guildId);
     const epochAtStart = getEpoch(guildId);
     return withGuildLock(guildId, async () => {
       if (getEpoch(guildId) !== epochAtStart) {
@@ -353,13 +372,20 @@ export function registerPersonalRoutes(
       if (!fav) return reply.code(404).send({ error: "Not found" });
       const target = await resolveTarget(me.userId, parseBody(request), reply);
       if (!target) return; // resolveTarget already replied (409)
-      const { tracks } = await resolveEntriesToTracks([fav.source], me.userId);
+      // Carry the favorite's cached title + cover into the resolved Track so
+      // a URL favorite shows its real meta immediately (it'd otherwise
+      // resolve lazily and read as the raw link until played).
+      const { tracks } = await resolveEntriesToTracks(
+        [{ source: fav.source, label: fav.label, coverUrl: fav.coverUrl }],
+        me.userId,
+      );
       if (tracks.length === 0) {
         return reply
           .code(409)
           .send({ error: "This favorite couldn't be played right now." });
       }
       const { guildId } = target;
+      await stampQueuedBy(tracks, me.userId, guildId);
       const status = (await runtime()
         .voice.status(guildId)
         .catch(() => null)) as { playing?: boolean } | null;

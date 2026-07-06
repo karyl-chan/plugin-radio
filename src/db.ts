@@ -16,7 +16,7 @@ import { getMusicDir, ensureMusicDirSync } from "./downloader.js";
  */
 
 const DB_FILE = "radio.db";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 let db: DB | null = null;
 
@@ -110,10 +110,18 @@ function migrate(conn: DB): void {
     CREATE INDEX IF NOT EXISTS user_playlists_owner_idx
       ON user_playlists(owner_id);
 
+    -- v5 adds \`label\` / \`cover_url\`: per-entry display metadata (title +
+    -- cover) captured when the entry was added from a queue track that had
+    -- it resolved, so re-queuing / previewing a stored playlist shows the
+    -- real title + cover immediately instead of a bare page URL (URL
+    -- entries otherwise resolve lazily and read as the raw link until
+    -- played). Nullable — manually-pasted entries carry no cached meta.
     CREATE TABLE IF NOT EXISTS user_playlist_entries (
       playlist_id TEXT NOT NULL REFERENCES user_playlists(id) ON DELETE CASCADE,
       position    INTEGER NOT NULL,
       value       TEXT NOT NULL,
+      label       TEXT,
+      cover_url   TEXT,
       PRIMARY KEY (playlist_id, position)
     );
 
@@ -136,6 +144,19 @@ function migrate(conn: DB): void {
     CREATE INDEX IF NOT EXISTS user_favorites_owner_idx
       ON user_favorites(owner_id);
   `);
+  // v5: back-fill the per-entry meta columns onto an existing
+  // \`user_playlist_entries\` (the CREATE IF NOT EXISTS above is a no-op when
+  // the table already exists). Idempotent: a fresh DB already has them, so
+  // the ADD COLUMN throws "duplicate column" — caught and ignored.
+  if (current < 5) {
+    for (const col of ["label TEXT", "cover_url TEXT"]) {
+      try {
+        conn.exec(`ALTER TABLE user_playlist_entries ADD COLUMN ${col}`);
+      } catch {
+        /* column already present (fresh DB) */
+      }
+    }
+  }
   conn.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 

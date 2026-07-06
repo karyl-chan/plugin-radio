@@ -125,9 +125,21 @@ function onToggleFavorite(t: Track): void {
 // ── save the current queue as a personal playlist ───────────────────
 // Reuses POST /api/me/playlists; the session token (real user) is accepted.
 async function saveAsPlaylist(): Promise<void> {
+  // Capture each track's cached title + cover alongside its source key, so
+  // the saved playlist shows real meta (not the raw URL) when re-queued or
+  // previewed. Tracks without a stable key (no trackId/sourceUrl) are dropped.
   const entries = playlist.value
-    .map(trackKey)
-    .filter((s): s is string => !!s);
+    .map((t) => {
+      const source = trackKey(t);
+      if (!source) return null;
+      const entry: { source: string; label?: string; coverUrl?: string } = {
+        source,
+      };
+      if (t.label) entry.label = t.label;
+      if (t.coverUrl) entry.coverUrl = t.coverUrl;
+      return entry;
+    })
+    .filter((e): e is { source: string; label?: string; coverUrl?: string } => !!e);
   if (entries.length === 0) {
     error("Nothing in the playlist to save.");
     return;

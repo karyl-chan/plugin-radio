@@ -20,6 +20,25 @@ import { getDb } from "./db.js";
  * `db.ts`, schema v3), kept separate from the manager-owned `playlists`.
  */
 
+/**
+ * One playlist entry: a free-form `source` string (a station key, an
+ * external URL, or a library track title/id — anything `resolveAnyTrack`
+ * accepts) plus optional display metadata captured when the entry was
+ * added from an already-resolved queue track. The cached `label`/`coverUrl`
+ * let the WebUI show the real title + cover for a URL entry immediately —
+ * without them a URL resolves lazily and reads as the raw link until it's
+ * actually played (see `resolveEntriesToTracks`). Manually-pasted entries
+ * carry no meta and fall back to that lazy resolution.
+ */
+export interface PlaylistEntry {
+  source: string;
+  label?: string;
+  coverUrl?: string;
+}
+
+/** What the API accepts for an entry: a bare source, or one with cached meta. */
+export type PlaylistEntryInput = string | PlaylistEntry;
+
 export interface UserPlaylist {
   id: string;
   /** Discord user id who owns it — the access anchor for every query. */
@@ -28,11 +47,11 @@ export interface UserPlaylist {
   name: string;
   description?: string;
   /**
-   * Ordered free-form source strings. Each is fed through
-   * `resolveAnyTrack` at play time — entries that fail to resolve are
-   * skipped, so a dead URL doesn't break the whole playlist.
+   * Ordered entries. Each `source` is fed through `resolveAnyTrack` at
+   * play time — entries that fail to resolve are skipped, so a dead URL
+   * doesn't break the whole playlist.
    */
-  entries: string[];
+  entries: PlaylistEntry[];
   createdAt: number;
   updatedAt: number;
 }
@@ -40,13 +59,15 @@ export interface UserPlaylist {
 export interface UserPlaylistPatch {
   name?: string;
   description?: string;
-  entries?: string[];
+  entries?: PlaylistEntryInput[];
 }
 
 const MAX_NAME = 80;
 const MAX_DESC = 500;
 const MAX_ENTRY = 500;
 const MAX_ENTRIES = 500;
+const MAX_LABEL = 300;
+const MAX_COVER = 1000;
 
 interface UserPlaylistRow {
   id: string;
@@ -61,10 +82,19 @@ function hydrate(row: UserPlaylistRow): UserPlaylist {
   const entries = (
     getDb()
       .prepare(
-        "SELECT value FROM user_playlist_entries WHERE playlist_id = ? ORDER BY position",
+        "SELECT value, label, cover_url FROM user_playlist_entries WHERE playlist_id = ? ORDER BY position",
       )
-      .all(row.id) as Array<{ value: string }>
-  ).map((r) => r.value);
+      .all(row.id) as Array<{
+      value: string;
+      label: string | null;
+      cover_url: string | null;
+    }>
+  ).map((r) => {
+    const e: PlaylistEntry = { source: r.value };
+    if (r.label) e.label = r.label;
+    if (r.cover_url) e.coverUrl = r.cover_url;
+    return e;
+  });
   const p: UserPlaylist = {
     id: row.id,
     ownerId: row.owner_id,
@@ -81,20 +111,39 @@ function normaliseName(s: string): string {
   return s.trim().toLowerCase();
 }
 
-function validateEntries(entries: unknown): string[] {
+/** Best-effort meta string: trim, drop empties, cap length (never throws —
+ *  cached title/cover is decorative, so a too-long one is truncated, not
+ *  rejected). Returns undefined when there's nothing usable. */
+function cleanMeta(v: unknown, max: number): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const trimmed = v.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+}
+
+function validateEntries(entries: unknown): PlaylistEntry[] {
   if (!Array.isArray(entries)) throw new Error("entries must be an array");
   if (entries.length > MAX_ENTRIES) {
     throw new Error(`Too many entries (max ${MAX_ENTRIES})`);
   }
-  const out: string[] = [];
+  const out: PlaylistEntry[] = [];
   for (const e of entries) {
-    if (typeof e !== "string") throw new Error("Each entry must be a string");
-    const trimmed = e.trim();
+    // Accept a bare source string or an object carrying cached display meta.
+    const raw = typeof e === "string" ? { source: e } : e;
+    if (!raw || typeof raw !== "object" || typeof raw.source !== "string") {
+      throw new Error("Each entry must be a source string or { source } object");
+    }
+    const trimmed = raw.source.trim();
     if (!trimmed) continue;
     if (trimmed.length > MAX_ENTRY) {
       throw new Error(`Entry too long (max ${MAX_ENTRY} chars)`);
     }
-    out.push(trimmed);
+    const entry: PlaylistEntry = { source: trimmed };
+    const label = cleanMeta((raw as PlaylistEntry).label, MAX_LABEL);
+    const coverUrl = cleanMeta((raw as PlaylistEntry).coverUrl, MAX_COVER);
+    if (label) entry.label = label;
+    if (coverUrl) entry.coverUrl = coverUrl;
+    out.push(entry);
   }
   return out;
 }
@@ -153,22 +202,25 @@ export async function getUserPlaylist(
   return row ? hydrate(row) : null;
 }
 
-function writeEntries(playlistId: string, entries: string[]): void {
+function writeEntries(playlistId: string, entries: PlaylistEntry[]): void {
   const db = getDb();
   db.prepare("DELETE FROM user_playlist_entries WHERE playlist_id = ?").run(
     playlistId,
   );
   const insert = db.prepare(
-    "INSERT INTO user_playlist_entries (playlist_id, position, value) VALUES (?, ?, ?)",
+    "INSERT INTO user_playlist_entries (playlist_id, position, value, label, cover_url) VALUES (?, ?, ?, ?, ?)",
   );
-  for (let i = 0; i < entries.length; i++) insert.run(playlistId, i, entries[i]);
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    insert.run(playlistId, i, e.source, e.label ?? null, e.coverUrl ?? null);
+  }
 }
 
 export async function addUserPlaylist(input: {
   ownerId: string;
   name: string;
   description?: string;
-  entries?: string[];
+  entries?: PlaylistEntryInput[];
 }): Promise<UserPlaylist> {
   const db = getDb();
   const id = randomUUID();
