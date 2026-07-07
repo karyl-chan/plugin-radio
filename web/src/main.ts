@@ -1,6 +1,9 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
+// Register the ui library's icons offline (the plugin UI can't reach the
+// Iconify API) — must run before any <Icon> renders.
+import "./register-icons";
 // @karyl-chan/ui tokens supply the palette AppButton / AppModal expect.
 // The shared reset.css is intentionally skipped — it locks body scroll
 // for the bot frontend's sidebar-driven layout, which would prevent
