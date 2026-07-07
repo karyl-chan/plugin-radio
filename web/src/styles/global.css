@@ -240,17 +240,19 @@ textarea:focus {
   color: var(--text-muted);
 }
 
-/* ── AppButton loading: keep width stable ────────────────────────────
+/* ── AppButton loading: keep width stable, keep the label ─────────────
    The shared @karyl-chan/ui AppButton renders the label span even while
-   loading, so the spinner is *added* next to the label and the button
-   grows. Pin the width by keeping the label's box (invisible) and
-   overlaying the spinner centered — `inset:0 + margin:auto` centers a
-   fixed-size box without a transform, so the spin animation is undisturbed. */
+   loading, so the spinner is *added* next to the label and the button grows.
+   Pin the width by taking the spinner OUT of flow (absolute, centered) so it
+   adds no width, and dim the label instead of hiding it — the text stays
+   readable behind the spinner rather than vanishing. `inset:0 + margin:auto`
+   centers a fixed-size box without a transform, so the spin animation is
+   undisturbed. */
 .app-btn--loading {
   position: relative;
 }
 .app-btn--loading .app-btn-label {
-  visibility: hidden;
+  opacity: 0.4;
 }
 .app-btn--loading .app-btn-spinner {
   position: absolute;
