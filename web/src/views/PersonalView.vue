@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { AppButton, AppTabs, Stack, type TabDef } from "@karyl-chan/ui";
+import {
+  AppButton,
+  AppItemCard,
+  AppTabs,
+  Stack,
+  type TabDef,
+} from "@karyl-chan/ui";
 import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import Thumb from "../components/Thumb.vue";
 import { api } from "../api";
@@ -173,10 +179,10 @@ const expandedIds = ref<Set<string>>(new Set());
 function isExpanded(id: string): boolean {
   return expandedIds.value.has(id);
 }
-function toggleExpand(id: string): void {
+function setExpanded(id: string, open: boolean): void {
   const next = new Set(expandedIds.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
+  if (open) next.add(id);
+  else next.delete(id);
   expandedIds.value = next;
 }
 
@@ -334,70 +340,70 @@ onBeforeUnmount(() => {
       <div class="section-title">Playlists</div>
       <ul class="list">
         <li v-if="playlists.length === 0" class="empty">No playlists yet.</li>
-        <li
-          v-for="p in playlists"
-          :key="p.id"
-          class="pl"
-          :class="{ 'pl--open': isExpanded(p.id) }"
-        >
-          <div class="pl-head">
-            <button
-              type="button"
-              class="pl-toggle"
-              :title="isExpanded(p.id) ? 'Collapse' : 'Show tracks'"
-              :disabled="p.entries.length === 0"
-              @click="toggleExpand(p.id)"
-            >{{ isExpanded(p.id) ? "▾" : "▸" }}</button>
-            <div class="thumb thumb--sm thumb--placeholder">🎵</div>
-            <div class="info">
-              <div class="name">{{ p.name }}</div>
-              <div class="dim">
-                {{ entryCountText(p.entries.length) }}{{ p.description ? " · " + p.description : "" }}
+        <li v-for="p in playlists" :key="p.id" class="pl-item">
+          <AppItemCard
+            :expanded="isExpanded(p.id)"
+            @update:expanded="(v) => setExpanded(p.id, v)"
+          >
+            <template #leading>
+              <div class="thumb thumb--sm thumb--placeholder">🎵</div>
+            </template>
+            <template #title>
+              <span class="pl-title">
+                <span class="pl-title__name">{{ p.name }}</span>
+                <span class="pl-title__meta">
+                  {{ entryCountText(p.entries.length) }}{{ p.description ? " · " + p.description : "" }}
+                </span>
+              </span>
+            </template>
+            <template #trailing>
+              <div class="actions">
+                <AppButton
+                  size="sm"
+                  :loading="playingId === p.id"
+                  :disabled="!canPlay || p.entries.length === 0"
+                  @click="playPlaylist(p)"
+                >▶ Play</AppButton>
+                <AppButton variant="ghost" size="sm" @click="openEditPlaylist(p)">
+                  ✎ Edit
+                </AppButton>
+                <AppButton
+                  variant="danger"
+                  size="sm"
+                  :loading="deletingId === p.id"
+                  :disabled="deletingId === p.id"
+                  @click="removePlaylist(p)"
+                >
+                  🗑
+                </AppButton>
               </div>
-            </div>
-            <div class="actions">
-              <AppButton
-                size="sm"
-                :loading="playingId === p.id"
-                :disabled="!canPlay || p.entries.length === 0"
-                @click="playPlaylist(p)"
-              >▶ Play</AppButton>
-              <AppButton variant="ghost" size="sm" @click="openEditPlaylist(p)">
-                ✎ Edit
-              </AppButton>
-              <AppButton
-                variant="danger"
-                size="sm"
-                :loading="deletingId === p.id"
-                :disabled="deletingId === p.id"
-                @click="removePlaylist(p)"
-              >
-                🗑
-              </AppButton>
-            </div>
-          </div>
+            </template>
 
-          <ul v-if="isExpanded(p.id)" class="pl-entries">
-            <li
-              v-for="(e, i) in p.entries"
-              :key="e.source + '-' + i"
-              class="pl-entry"
-            >
-              <Thumb :src="e.coverUrl" />
-              <div class="info">
-                <div class="name">{{ e.label || e.source }}</div>
-                <div class="dim" v-if="e.label && e.source.startsWith('http')">
-                  {{ e.source }}
+            <ul class="pl-entries">
+              <li v-if="p.entries.length === 0" class="pl-empty">
+                No tracks yet.
+              </li>
+              <li
+                v-for="(e, i) in p.entries"
+                :key="e.source + '-' + i"
+                class="pl-entry"
+              >
+                <Thumb :src="e.coverUrl" />
+                <div class="info">
+                  <div class="name">{{ e.label || e.source }}</div>
+                  <div class="dim" v-if="e.label && e.source.startsWith('http')">
+                    {{ e.source }}
+                  </div>
                 </div>
-              </div>
-              <AppButton
-                size="sm"
-                :loading="queueingEntryKey === entryKey(p.id, i)"
-                :disabled="!canPlay"
-                @click="queueEntry(p, e, i)"
-              >+ Queue</AppButton>
-            </li>
-          </ul>
+                <AppButton
+                  size="sm"
+                  :loading="queueingEntryKey === entryKey(p.id, i)"
+                  :disabled="!canPlay"
+                  @click="queueEntry(p, e, i)"
+                >+ Queue</AppButton>
+              </li>
+            </ul>
+          </AppItemCard>
         </li>
       </ul>
     </section>
@@ -634,39 +640,29 @@ onBeforeUnmount(() => {
 }
 .actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
 
-/* ── expandable playlist row ─────────────────────────────────────────── */
-.pl {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  overflow: hidden;
-}
-.pl-head {
+/* ── playlist card (AppItemCard) contents ────────────────────────────── */
+/* #title slot: name + entry-count stacked inside the card's expander button. */
+.pl-title {
   display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.6rem 0.75rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  min-width: 0;
 }
-.pl-toggle {
-  flex-shrink: 0;
-  width: 1.3rem;
-  background: transparent;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  line-height: 1;
-  transition: color var(--transition-fast);
+.pl-title__name {
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
-.pl-toggle:hover:not(:disabled) { color: var(--text); }
-.pl-toggle:disabled { opacity: 0.3; cursor: default; }
+.pl-title__meta { font-size: 0.8rem; color: var(--text-muted); }
 
+/* body slot: the playlist's tracks, each with a + Queue button. */
 .pl-entries {
   list-style: none;
   margin: 0;
-  padding: 0.3rem 0.6rem 0.55rem 2.05rem;
-  border-top: 1px solid var(--border);
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -679,4 +675,9 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
 }
 .pl-entry:hover { background: var(--bg-surface-2); }
+.pl-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.35rem;
+}
 </style>
