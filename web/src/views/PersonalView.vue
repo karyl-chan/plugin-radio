@@ -7,6 +7,7 @@ import {
   Stack,
   type TabDef,
 } from "@karyl-chan/ui";
+import { Icon } from "@iconify/vue";
 import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import Thumb from "../components/Thumb.vue";
 import { api } from "../api";
@@ -387,7 +388,13 @@ onBeforeUnmount(() => {
                   :aria-expanded="isExpanded(p.id)"
                   :title="isExpanded(p.id) ? 'Collapse tracks' : 'Show tracks'"
                   @click="setExpanded(p.id, !isExpanded(p.id))"
-                >{{ isExpanded(p.id) ? "∧" : "∨" }}</button>
+                >
+                  <Icon
+                    :icon="isExpanded(p.id) ? 'material-symbols:expand-less-rounded' : 'material-symbols:expand-more-rounded'"
+                    width="20"
+                    height="20"
+                  />
+                </button>
               </div>
             </template>
 
@@ -653,24 +660,34 @@ onBeforeUnmount(() => {
 .actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
 
 /* ── playlist card (AppItemCard) contents ────────────────────────────── */
+/* Match the favorites .item row exactly — same padding, background, gap and
+   corner radius — so favorites and playlist rows read as one consistent list. */
+.pl-item :deep(.app-item-card) { border-radius: var(--radius-sm); }
+.pl-item :deep(.app-item-card__head) {
+  padding: 0.6rem 0.75rem;
+  gap: 0.75rem;
+  background: var(--bg-surface);
+}
 /* Move the expand/collapse affordance to the right: hide AppItemCard's
-   built-in left chevron and show our own ∧/∨ after the actions. The title is
-   still click-to-toggle. */
+   built-in left chevron and show our own (an icon) after the actions. The
+   title is still click-to-toggle. */
 :deep(.app-item-card__chevron) { display: none; }
 .pl-chevron {
   flex-shrink: 0;
-  width: 1.6rem;
-  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
   background: transparent;
   border: 0;
   padding: 0;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 0.95rem;
-  line-height: 1;
-  transition: color var(--transition-fast);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
-.pl-chevron:hover { color: var(--text); }
+.pl-chevron:hover { color: var(--text); background: var(--bg-surface-2); }
 
 /* #title slot: name + entry-count stacked inside the card's expander button. */
 .pl-title {
