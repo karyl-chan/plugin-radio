@@ -185,6 +185,11 @@ function setExpanded(id: string, open: boolean): void {
   else next.delete(id);
   expandedIds.value = next;
 }
+/** Playlist preview image — the first entry that has a cached cover, matching
+ *  how the player's add-to-queue suggestions pick a playlist thumbnail. */
+function playlistCover(p: UserPlaylist): string | undefined {
+  return p.entries.find((e) => e.coverUrl)?.coverUrl;
+}
 
 // Per-entry queue in-flight key ("<playlistId>:<index>") for the row spinner.
 const queueingEntryKey = ref<string | null>(null);
@@ -346,7 +351,7 @@ onBeforeUnmount(() => {
             @update:expanded="(v) => setExpanded(p.id, v)"
           >
             <template #leading>
-              <div class="thumb thumb--sm thumb--placeholder">🎵</div>
+              <Thumb :src="playlistCover(p)" />
             </template>
             <template #title>
               <span class="pl-title">
@@ -376,6 +381,13 @@ onBeforeUnmount(() => {
                 >
                   🗑
                 </AppButton>
+                <button
+                  type="button"
+                  class="pl-chevron"
+                  :aria-expanded="isExpanded(p.id)"
+                  :title="isExpanded(p.id) ? 'Collapse tracks' : 'Show tracks'"
+                  @click="setExpanded(p.id, !isExpanded(p.id))"
+                >{{ isExpanded(p.id) ? "∧" : "∨" }}</button>
               </div>
             </template>
 
@@ -641,6 +653,25 @@ onBeforeUnmount(() => {
 .actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
 
 /* ── playlist card (AppItemCard) contents ────────────────────────────── */
+/* Move the expand/collapse affordance to the right: hide AppItemCard's
+   built-in left chevron and show our own ∧/∨ after the actions. The title is
+   still click-to-toggle. */
+:deep(.app-item-card__chevron) { display: none; }
+.pl-chevron {
+  flex-shrink: 0;
+  width: 1.6rem;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  transition: color var(--transition-fast);
+}
+.pl-chevron:hover { color: var(--text); }
+
 /* #title slot: name + entry-count stacked inside the card's expander button. */
 .pl-title {
   display: flex;
