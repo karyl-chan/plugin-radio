@@ -13,6 +13,7 @@ import { api } from "../api";
 import { useToast } from "../composables/use-toast";
 import { useApiKeys } from "../composables/use-api-keys";
 import { useFavorites } from "../composables/use-favorites";
+import { useBusy } from "../composables/use-busy";
 import type {
   PlaylistEntry,
   UserFavorite,
@@ -191,8 +192,9 @@ function playlistCover(p: UserPlaylist): string | undefined {
   return p.entries.find((e) => e.coverUrl)?.coverUrl;
 }
 
-// Per-entry queue in-flight key ("<playlistId>:<index>") for the row spinner.
-const queueingEntryKey = ref<string | null>(null);
+// In-flight "+ Queue" clicks (favorites and playlist entries share one busy
+// set) — keyed by the favorite id or "<playlistId>:<index>" for a track row.
+const { isBusy: isQueuing, run: runQueue } = useBusy();
 function entryKey(playlistId: string, i: number): string {
   return `${playlistId}:${i}`;
 }
@@ -206,21 +208,19 @@ async function queueEntry(
     error("Join a voice channel first");
     return;
   }
-  const key = entryKey(p.id, i);
-  queueingEntryKey.value = key;
-  try {
-    await api("POST", "/api/me/queue-source", {
-      source: e.source,
-      label: e.label,
-      coverUrl: e.coverUrl,
-      guildId,
-    });
-    ok(`Queued "${e.label || e.source}"`);
-  } catch (err: any) {
-    error(err.message || "Couldn't queue this track");
-  } finally {
-    queueingEntryKey.value = null;
-  }
+  await runQueue(entryKey(p.id, i), async () => {
+    try {
+      await api("POST", "/api/me/queue-source", {
+        source: e.source,
+        label: e.label,
+        coverUrl: e.coverUrl,
+        guildId,
+      });
+      ok(`Queued "${e.label || e.source}"`);
+    } catch (err: any) {
+      error(err.message || "Couldn't queue this track");
+    }
+  });
 }
 
 // ── API keys (self-service) — shared CRUD (see use-api-keys) ────────
@@ -239,7 +239,6 @@ const {
 
 // ── favorites ───────────────────────────────────────────────────────
 const { favorites, load: loadFavorites, remove: removeFavorite } = useFavorites();
-const queueingFavId = ref<string | null>(null);
 const removingFavId = ref<string | null>(null);
 
 async function queueFavorite(f: UserFavorite): Promise<void> {
@@ -248,17 +247,16 @@ async function queueFavorite(f: UserFavorite): Promise<void> {
     error("Join a voice channel first");
     return;
   }
-  queueingFavId.value = f.id;
-  try {
-    await api("POST", `/api/me/favorites/${encodeURIComponent(f.id)}/queue`, {
-      guildId,
-    });
-    ok(`Queued "${f.label}"`);
-  } catch (e: any) {
-    error(e.message || "Couldn't queue this favorite");
-  } finally {
-    queueingFavId.value = null;
-  }
+  await runQueue(f.id, async () => {
+    try {
+      await api("POST", `/api/me/favorites/${encodeURIComponent(f.id)}/queue`, {
+        guildId,
+      });
+      ok(`Queued "${f.label}"`);
+    } catch (e: any) {
+      error(e.message || "Couldn't queue this favorite");
+    }
+  });
 }
 
 async function removeFav(f: UserFavorite): Promise<void> {
@@ -427,7 +425,7 @@ onBeforeUnmount(() => {
                 </div>
                 <AppButton
                   size="sm"
-                  :loading="queueingEntryKey === entryKey(p.id, i)"
+                  :loading="isQueuing(entryKey(p.id, i))"
                   :disabled="!canPlay"
                   @click="queueEntry(p, e, i)"
                 >+ Queue</AppButton>
@@ -464,7 +462,7 @@ onBeforeUnmount(() => {
           <div class="actions">
             <AppButton
               size="sm"
-              :loading="queueingFavId === f.id"
+              :loading="isQueuing(f.id)"
               :disabled="!canPlay"
               @click="queueFavorite(f)"
             >+ Queue</AppButton>
@@ -682,7 +680,7 @@ onBeforeUnmount(() => {
 /* Move the expand/collapse affordance to the right: hide AppItemCard's
    built-in left chevron and show our own (an icon) after the actions. The
    title is still click-to-toggle. */
-:deep(.app-item-card__chevron) { display: none; }
+.pl-item :deep(.app-item-card__chevron) { display: none; }
 .pl-chevron {
   flex-shrink: 0;
   display: inline-flex;

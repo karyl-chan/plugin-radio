@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Sortable from "sortablejs";
+import { SORTABLE_AUTOSCROLL } from "../lib/sortable-autoscroll";
 import { AppButton } from "@karyl-chan/ui";
 import Thumb from "./Thumb.vue";
 import TrackLink from "./TrackLink.vue";
@@ -108,10 +109,7 @@ function bindSortable() {
     // Auto-scroll the enclosing scroll container (.playlist-scroll) when the
     // drag nears its top/bottom edge, so a long queue can be reordered across
     // a big distance without letting go. bubbleScroll reaches the ancestor.
-    scroll: true,
-    bubbleScroll: true,
-    scrollSensitivity: 80,
-    scrollSpeed: 14,
+    ...SORTABLE_AUTOSCROLL,
     ghostClass: "drag-ghost",
     chosenClass: "drag-chosen",
     dragClass: "drag-active",

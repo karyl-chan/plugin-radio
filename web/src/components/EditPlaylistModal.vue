@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import Sortable from "sortablejs";
+import { SORTABLE_AUTOSCROLL } from "../lib/sortable-autoscroll";
 import { AppButton, AppModal } from "@karyl-chan/ui";
 import Thumb from "./Thumb.vue";
 import { api } from "../api";
@@ -234,10 +235,7 @@ function bindSortable(): void {
     animation: 150,
     // Auto-scroll the entry list when the drag nears its top/bottom edge so a
     // long playlist can be reordered without manually scrolling mid-drag.
-    scroll: true,
-    bubbleScroll: true,
-    scrollSensitivity: 80,
-    scrollSpeed: 14,
+    ...SORTABLE_AUTOSCROLL,
     ghostClass: "drag-ghost",
     onEnd: (evt) => {
       const from = evt.oldIndex ?? -1;
