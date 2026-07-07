@@ -25,6 +25,18 @@ import { t, type Locale } from "./i18n/index.js";
 /** Embed colour shared across the radio plugin's Discord replies. */
 export const EMBED_COLOR = 0x5865f2;
 
+// Covers are stored host-independent as root-relative `/cover/…` paths. Discord
+// fetches the embed thumbnail from its own servers, so it needs an absolute
+// public URL — prefix relative covers with the live effectiveBase(). Wired
+// from plugin.ts at init (same getter the now-playing links use).
+let _coverBase: () => string = () => "";
+export function setCoverBaseGetter(fn: () => string): void {
+  _coverBase = fn;
+}
+function absolutizeCover(url: string): string {
+  return url.startsWith("/") && !url.startsWith("//") ? _coverBase() + url : url;
+}
+
 export function formatStationList(locale: Locale): string {
   const lines = STATIONS.map((s) =>
     t(locale, "stationList.entry", {
@@ -168,7 +180,9 @@ export function renderNowPlayingEmbed(
     title: paused ? t(locale, "now.titlePaused") : t(locale, "now.titlePlaying"),
     color: EMBED_COLOR,
     description: lines.join("\n"),
-    ...(cur?.coverUrl ? { thumbnail: { url: cur.coverUrl } } : {}),
+    ...(cur?.coverUrl
+      ? { thumbnail: { url: absolutizeCover(cur.coverUrl) } }
+      : {}),
   };
 }
 

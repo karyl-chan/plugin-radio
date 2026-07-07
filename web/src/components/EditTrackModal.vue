@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { AppButton, AppModal } from "@karyl-chan/ui";
 import { api, apiUpload } from "../api";
+import { coverSrc } from "../lib/cover-src";
 import { useToast } from "../composables/use-toast";
 import type { LibraryTrack } from "../types";
 
@@ -28,7 +29,9 @@ const localPreview = ref<string | null>(null);
 const saving = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 
-const previewSrc = computed(() => localPreview.value || coverUrl.value || "");
+const previewSrc = computed(
+  () => localPreview.value || coverSrc(coverUrl.value) || "",
+);
 
 function clearLocalPreview() {
   if (localPreview.value) {

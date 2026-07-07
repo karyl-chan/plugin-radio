@@ -38,6 +38,7 @@ import {
   loopBadge,
   nowPlayingComponents,
   renderNowPlayingEmbed,
+  setCoverBaseGetter,
 } from "./format.js";
 import {
   cycleLoopMode,
@@ -107,6 +108,9 @@ const RADIO_PUBLIC_URL_ENV = process.env.RADIO_PUBLIC_URL
 // directly would create a now-playing ↔ web-routes cycle).
 setPublicUrlEnvFallback(RADIO_PUBLIC_URL_ENV);
 nowPlaying.setEffectiveBaseGetter(effectiveBase);
+// Discord embed thumbnails are stored relative — absolutize them with the same
+// live base so Discord's servers can fetch the cover.
+setCoverBaseGetter(effectiveBase);
 
 type BotRpcFn = (path: string, body?: unknown) => Promise<unknown | null>;
 

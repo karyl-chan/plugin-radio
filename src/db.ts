@@ -16,7 +16,7 @@ import { getMusicDir, ensureMusicDirSync } from "./downloader.js";
  */
 
 const DB_FILE = "radio.db";
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 let db: DB | null = null;
 
@@ -154,6 +154,38 @@ function migrate(conn: DB): void {
         conn.exec(`ALTER TABLE user_playlist_entries ADD COLUMN ${col}`);
       } catch {
         /* column already present (fresh DB) */
+      }
+    }
+  }
+  // v6 (data): earlier builds stored each uploaded cover as an ABSOLUTE URL —
+  // `${effectiveBase()}/cover/<file>` — freezing the host at upload time. When
+  // the plugin's public URL/proxy later changed (or effectiveBase() fell back
+  // to `http://localhost:903`), the browser could no longer reach those baked
+  // hosts (ERR_CONNECTION_REFUSED). Covers are now host-independent, root-
+  // relative `/cover/<file>` paths; rewrite legacy absolute cover URLs to
+  // match. Only touches our own `…/cover/<id>.<ext>` URLs — external thumbnails
+  // (YouTube) and already-relative values don't match. Idempotent.
+  if (current < 6) {
+    const COVER_TAIL = /^[\w.-]+\.(?:jpe?g|png|webp|gif)(?:\?.*)?$/i;
+    for (const table of [
+      "tracks",
+      "user_favorites",
+      "user_playlist_entries",
+    ]) {
+      const rows = conn
+        .prepare(
+          `SELECT DISTINCT cover_url AS v FROM ${table} WHERE cover_url LIKE 'http%/cover/%'`,
+        )
+        .all() as { v: string }[];
+      const upd = conn.prepare(
+        `UPDATE ${table} SET cover_url = ? WHERE cover_url = ?`,
+      );
+      for (const { v } of rows) {
+        const idx = v.lastIndexOf("/cover/");
+        if (idx < 0) continue;
+        const rel = v.slice(idx); // "/cover/<id>.<ext>?v=…"
+        if (!COVER_TAIL.test(rel.slice("/cover/".length))) continue;
+        upd.run(rel, v);
       }
     }
   }

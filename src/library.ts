@@ -170,6 +170,11 @@ const URL_UNSAFE_CHARS = /["'<>\s\\]/;
 
 function isSafeImageUrl(s: string): boolean {
   if (URL_UNSAFE_CHARS.test(s)) return false;
+  // Our own uploaded covers are stored host-independent as root-relative
+  // `/cover/…` paths (the WebUI prefixes them with the plugin mount base; the
+  // Discord embed absolutizes them). Accept those alongside http(s) URLs, but
+  // reject protocol-relative `//host` (would escape our origin).
+  if (s.startsWith("/") && !s.startsWith("//")) return true;
   let u: URL;
   try {
     u = new URL(s);

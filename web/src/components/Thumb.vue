@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { coverSrc } from "../lib/cover-src";
 
 const props = withDefaults(
   defineProps<{
@@ -9,6 +10,10 @@ const props = withDefaults(
   }>(),
   { size: "sm", placeholder: "🎵" },
 );
+
+// Uploaded covers are stored as root-relative `/cover/…` paths — prefix them
+// with the plugin mount base so they resolve under the bot proxy.
+const resolvedSrc = computed(() => coverSrc(props.src));
 
 const failed = ref(false);
 watch(
@@ -21,10 +26,10 @@ watch(
 
 <template>
   <img
-    v-if="src && !failed"
+    v-if="resolvedSrc && !failed"
     class="thumb"
     :class="`thumb--${size}`"
-    :src="src"
+    :src="resolvedSrc"
     alt=""
     @error="failed = true"
   />

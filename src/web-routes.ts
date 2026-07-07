@@ -518,11 +518,14 @@ export async function registerWebRoutes(
         return reply.code(400).send({ error: "Empty file" });
       }
       const filename = await saveCover(id, buf, ext);
-      // Append a cache-busting query param keyed on upload time. Without
-      // it, replacing a cover with another of the same mimetype yields
-      // an identical `<id>.<ext>` URL and browsers happily serve the
-      // stale image from disk cache.
-      const coverUrl = `${getEffectiveBase()}/cover/${filename}?v=${Date.now()}`;
+      // Store the cover host-independent as a root-relative `/cover/…` path —
+      // NOT `${getEffectiveBase()}/cover/…`. Baking the absolute base in froze
+      // the host at upload time, so a later public-URL/proxy change (or the
+      // localhost fallback) left the browser unable to reach it. The WebUI
+      // prefixes this with the plugin mount base; the Discord embed absolutizes
+      // it with the live effectiveBase(). The `?v=` cache-buster keyed on
+      // upload time still defeats stale disk-cache when a cover is replaced.
+      const coverUrl = `/cover/${filename}?v=${Date.now()}`;
       try {
         const updated = await updateTrack(id, { coverUrl });
         return { track: updated };
