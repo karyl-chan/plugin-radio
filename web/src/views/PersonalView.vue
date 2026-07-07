@@ -7,7 +7,6 @@ import {
   Stack,
   type TabDef,
 } from "@karyl-chan/ui";
-import { Icon } from "@iconify/vue";
 import EditPlaylistModal from "../components/EditPlaylistModal.vue";
 import Thumb from "../components/Thumb.vue";
 import { api } from "../api";
@@ -385,15 +384,27 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="pl-chevron"
+                  :class="{ 'pl-chevron--up': isExpanded(p.id) }"
                   :aria-expanded="isExpanded(p.id)"
                   :title="isExpanded(p.id) ? 'Collapse tracks' : 'Show tracks'"
                   @click="setExpanded(p.id, !isExpanded(p.id))"
                 >
-                  <Icon
-                    :icon="isExpanded(p.id) ? 'material-symbols:expand-less-rounded' : 'material-symbols:expand-more-rounded'"
+                  <svg
+                    class="pl-chevron__svg"
+                    viewBox="0 0 24 24"
                     width="20"
                     height="20"
-                  />
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="m6 9 6 6 6-6"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
                 </button>
               </div>
             </template>
@@ -688,6 +699,12 @@ onBeforeUnmount(() => {
   transition: color var(--transition-fast), background var(--transition-fast);
 }
 .pl-chevron:hover { color: var(--text); background: var(--bg-surface-2); }
+/* Chevron points down when collapsed, flips up when expanded. */
+.pl-chevron__svg {
+  display: block;
+  transition: transform var(--transition-fast);
+}
+.pl-chevron--up .pl-chevron__svg { transform: rotate(180deg); }
 
 /* #title slot: name + entry-count stacked inside the card's expander button. */
 .pl-title {
