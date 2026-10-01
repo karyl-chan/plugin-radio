@@ -13,12 +13,18 @@ RUN pnpm install --frozen-lockfile && \
 
 # ── runtime ───────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-trixie-slim AS runtime
+# yt-dlp lives in a node-owned dir so the plugin can `yt-dlp -U` itself at
+# runtime (see startYtDlpAutoUpdate) — this layer is cached, so the version
+# baked here goes stale and YouTube starts 403-ing its stream URLs.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg python3 ca-certificates curl && \
-    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp && \
+    mkdir -p /opt/yt-dlp && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /opt/yt-dlp/yt-dlp && \
+    chmod a+rx /opt/yt-dlp/yt-dlp && \
+    chown -R node:node /opt/yt-dlp && \
     apt-get remove -y curl && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
+ENV PATH="/opt/yt-dlp:${PATH}"
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package.json ./

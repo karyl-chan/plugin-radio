@@ -179,7 +179,10 @@ has the right to play in their voice channels:
 
 - the bot's voice RPC (`voice.join` / `voice.play` / `voice.pause` / `voice.stop` / `voice.status`) — the plugin does no audio I/O of its own beyond resolving/downloading
 - `messages.send` / `messages.edit` / `messages.delete` (the now-playing message) and the component-dispatch path (the control buttons) — needs a bot recent enough to provide them
-- `ffmpeg` and `yt-dlp` in the container (see `Dockerfile.radio`)
+- `ffmpeg` and `yt-dlp` in the container (see `Dockerfile`). yt-dlp
+  self-updates (`yt-dlp -U`) at startup and every `RADIO_YTDLP_UPDATE_HOURS`
+  (default 24; `0` disables) — a stale yt-dlp resolves YouTube stream URLs
+  that 403 on playback, so every YouTube track ends instantly
 - volumes for the library and cover images (`MUSIC_DIR` / `COVER_DIR`; mapped in the monorepo `docker-compose.yml`)
 
 ## Setup

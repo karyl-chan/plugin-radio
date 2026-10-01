@@ -5,6 +5,7 @@ import buildPlugin, {
   setRadioSessionVerifyKey,
 } from "./plugin.js";
 import { startAdvanceLoop } from "./advance-loop.js";
+import { startYtDlpAutoUpdate } from "./downloader.js";
 import { wireRuntime } from "./runtime.js";
 
 const started = await buildPlugin().start();
@@ -31,3 +32,4 @@ wireRuntime({
   log,
 });
 startAdvanceLoop(started.botRpc, log, seenGuilds);
+startYtDlpAutoUpdate(log);
