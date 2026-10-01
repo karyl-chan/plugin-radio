@@ -214,11 +214,16 @@ async function runYtDlp(
  * it current itself. `RADIO_YTDLP_UPDATE_HOURS=0` disables (e.g. a host
  * that pins yt-dlp).
  */
-const YTDLP_UPDATE_INTERVAL_MS = (() => {
-  const raw = Number(process.env.RADIO_YTDLP_UPDATE_HOURS ?? "");
-  const hours = Number.isFinite(raw) && raw >= 0 ? raw : 24;
-  return hours * 3_600_000;
-})();
+const YTDLP_UPDATE_INTERVAL_MS = ytDlpUpdateIntervalMs(
+  process.env.RADIO_YTDLP_UPDATE_HOURS,
+);
+
+/** `RADIO_YTDLP_UPDATE_HOURS` → ms. Unset / blank / garbage → 24 h. (Not
+ *  `Number()`: `Number("")` is 0, which would silently disable updates.) */
+export function ytDlpUpdateIntervalMs(raw: string | undefined): number {
+  const hours = parseFloat(raw ?? "");
+  return (Number.isFinite(hours) && hours >= 0 ? hours : 24) * 3_600_000;
+}
 
 /**
  * Self-update yt-dlp now and then every `RADIO_YTDLP_UPDATE_HOURS`
