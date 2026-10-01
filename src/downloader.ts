@@ -206,6 +206,47 @@ async function runYtDlp(
   }
 }
 
+/**
+ * How often to `yt-dlp -U`. YouTube changes break older yt-dlp releases
+ * within weeks — the symptom is a stream URL that resolves fine but 403s
+ * when ffmpeg opens it, so every YouTube track "ends" instantly. The
+ * Dockerfile's yt-dlp layer is cached across rebuilds, so the plugin keeps
+ * it current itself. `RADIO_YTDLP_UPDATE_HOURS=0` disables (e.g. a host
+ * that pins yt-dlp).
+ */
+const YTDLP_UPDATE_INTERVAL_MS = (() => {
+  const raw = Number(process.env.RADIO_YTDLP_UPDATE_HOURS ?? "");
+  const hours = Number.isFinite(raw) && raw >= 0 ? raw : 24;
+  return hours * 3_600_000;
+})();
+
+/**
+ * Self-update yt-dlp now and then every `RADIO_YTDLP_UPDATE_HOURS`
+ * (default 24). Best-effort: a failure (no network, read-only binary) is
+ * logged and the current version keeps serving. Bypasses the concurrency
+ * cap — in-flight yt-dlp runs keep the old binary's inode, so replacing
+ * it underneath them is safe.
+ */
+export function startYtDlpAutoUpdate(log: {
+  info: (msg: string, meta?: Record<string, unknown>) => void;
+  warn: (msg: string, meta?: Record<string, unknown>) => void;
+}): void {
+  if (YTDLP_UPDATE_INTERVAL_MS <= 0) return;
+  const update = async () => {
+    try {
+      const out = await spawnYtDlp(["-U"], 120_000);
+      const summary = out.trim().split("\n").pop() ?? "";
+      log.info("yt-dlp update check", { result: summary });
+    } catch (err) {
+      log.warn("yt-dlp self-update failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+  void update();
+  setInterval(() => void update(), YTDLP_UPDATE_INTERVAL_MS).unref();
+}
+
 function spawnYtDlp(args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn("yt-dlp", args, { stdio: ["ignore", "pipe", "pipe"] });
