@@ -62,38 +62,26 @@ export async function resolveViewer(
   const id = userId as string;
 
   if (guildId) {
-    const res = (await runtime()
-      .botRpc("/api/plugin/members.get", { guild_id: guildId, user_ids: [id] })
-      .catch(() => null)) as { members?: Array<Record<string, unknown>> } | null;
-    const m = res?.members?.find((x) => x.userId === id);
-    if (m && typeof m.displayName === "string") {
+    const member = await runtime()
+      .discord.members.get({ guildId, userId: id })
+      .catch(() => null);
+    if (member) {
       return {
         id,
-        displayName: m.displayName,
-        avatarUrl: stillAvatarUrl(
-          typeof m.avatarUrl === "string" ? m.avatarUrl : null,
-        ),
+        displayName: member.displayName,
+        avatarUrl: stillAvatarUrl(member.avatarUrl),
       };
     }
   }
 
-  const res = (await runtime()
-    .botRpc("/api/plugin/users.get", { user_ids: [id] })
-    .catch(() => null)) as { users?: Array<Record<string, unknown>> } | null;
-  const u = res?.users?.find((x) => x.userId === id);
-  if (u) {
-    const displayName =
-      typeof u.displayName === "string"
-        ? u.displayName
-        : typeof u.username === "string"
-          ? u.username
-          : id;
+  const user = await runtime()
+    .discord.users.get({ userId: id })
+    .catch(() => null);
+  if (user) {
     return {
       id,
-      displayName,
-      avatarUrl: stillAvatarUrl(
-        typeof u.avatarUrl === "string" ? u.avatarUrl : null,
-      ),
+      displayName: user.displayName || user.username || id,
+      avatarUrl: stillAvatarUrl(user.avatarUrl),
     };
   }
   return null;

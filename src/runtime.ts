@@ -11,12 +11,16 @@
  *
  * Typed RPC: 0.4 of `@karyl-chan/plugin-sdk` exposes the camelCase
  * `voice.*` / `discord.*` namespaces on `StartedPlugin`. Reading them
- * here removes the per-call `botRpc("/api/plugin/voice.status", { ... })`
- * string-typed dispatch from the rest of the codebase. Auth (which
- * has no typed wrapper) still uses raw `botRpc`.
+ * here removes per-call string-typed dispatch from the rest of the
+ * codebase.
  */
 
-import type { Discord, Logger as SdkLogger, Voice } from "@karyl-chan/plugin-sdk";
+import type {
+  Auth,
+  Discord,
+  Logger as SdkLogger,
+  Voice,
+} from "@karyl-chan/plugin-sdk";
 
 export interface Logger {
   info(msg: string, meta?: Record<string, unknown>): void;
@@ -30,16 +34,24 @@ interface Runtime {
   botRpc: BotRpc;
   discord: Discord;
   voice: Voice;
+  auth: Auth;
   log: Logger;
 }
 
 let active: Runtime | null = null;
 
-export function wireRuntime(r: { botRpc: BotRpc; discord: Discord; voice: Voice; log: SdkLogger | Logger }): void {
+export function wireRuntime(r: {
+  botRpc: BotRpc;
+  discord: Discord;
+  voice: Voice;
+  auth: Auth;
+  log: SdkLogger | Logger;
+}): void {
   active = {
     botRpc: r.botRpc,
     discord: r.discord,
     voice: r.voice,
+    auth: r.auth,
     log: {
       info: (msg, meta) => (r.log as Logger).info(msg, meta),
       warn: (msg, meta) => (r.log as Logger).warn(msg, meta),
