@@ -151,14 +151,14 @@ export function registerPersonalRoutes(
           .code(409)
           .send({ error: "You're not in a voice channel on that server." });
       }
-      const res = (await runtime()
-        .botRpc("/api/plugin/auth.session", {
-          user_id: me.userId,
+      const res = await runtime()
+        .auth.mintSession({
+          userId: me.userId,
           kind: "session",
-          guild_id: guildId,
+          guildId,
         })
-        .catch(() => null)) as { token?: string } | null;
-      if (!res || typeof res.token !== "string") {
+        .catch(() => ({ allowed: false } as const));
+      if (!res.allowed) {
         return reply.code(502).send({ error: "Couldn't create a session link." });
       }
       return { url: `${effectiveBase()}/?token=${res.token}` };

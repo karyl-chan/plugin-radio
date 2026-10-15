@@ -6,6 +6,8 @@ import {
   type ComponentReply,
   type CommandOption,
   type MessageActionRow,
+  type Auth,
+  type MintSessionArgs,
   definePlugin,
   definePluginCapability,
   definePluginCommand,
@@ -112,8 +114,6 @@ nowPlaying.setEffectiveBaseGetter(effectiveBase);
 // live base so Discord's servers can fetch the cover.
 setCoverBaseGetter(effectiveBase);
 
-type BotRpcFn = (path: string, body?: unknown) => Promise<unknown | null>;
-
 // ── Session WebUI link ────────────────────────────────────────────────────
 // Each play/queue/etc response (and /radio np) carries a Link button to
 // the session WebUI. The URL embeds a 6h bot-signed JWT scoped to this
@@ -143,15 +143,15 @@ function clearGuildSessionTokens(guildId: string): void {
 // real Discord id, so they're cached per user rather than per guild.
 const personalTokens = new Map<string, CachedToken>();
 
-/** Cache-with-refresh-margin around the bot's `auth.session` mint. The caller
- *  supplies the `map` + cache `key` (per (guild,user) for guild session tokens,
- *  per user for guildless personal tokens) and the exact RPC `body` — a
- *  personal token is just a guild session token minted without `guild_id`. */
+/** Cache-with-refresh-margin around the typed `auth.mintSession` call. The
+ *  caller supplies the `map` + cache `key` (per (guild,user) for guild session
+ *  tokens, per user for guildless personal tokens) and the exact arguments — a
+ *  personal token is just a guild session token minted without `guildId`. */
 async function mintCachedToken(
-  botRpc: BotRpcFn,
+  auth: Auth,
   map: Map<string, CachedToken>,
   key: string,
-  body: Record<string, unknown>,
+  args: MintSessionArgs,
 ): Promise<string | null> {
   const cached = map.get(key);
   if (
@@ -160,36 +160,36 @@ async function mintCachedToken(
   ) {
     return cached.token;
   }
-  const res = (await botRpc("/api/plugin/auth.session", body)) as
-    | { token?: string; expiresAt?: number }
-    | null;
-  if (!res || typeof res.token !== "string") return null;
+  const res = await auth
+    .mintSession(args)
+    .catch(() => ({ allowed: false }) as const);
+  if (!res.allowed) return null;
   map.set(key, {
     token: res.token,
-    expiresAt: typeof res.expiresAt === "number" ? res.expiresAt : Date.now(),
+    expiresAt: res.expiresAt,
   });
   return res.token;
 }
 
 async function getSessionToken(
-  botRpc: BotRpcFn,
+  auth: Auth,
   userId: string,
   guildId: string,
 ): Promise<string | null> {
-  return mintCachedToken(botRpc, sessionTokens, sessionCacheKey(guildId, userId), {
-    user_id: userId,
+  return mintCachedToken(auth, sessionTokens, sessionCacheKey(guildId, userId), {
+    userId,
     kind: "session",
-    guild_id: guildId,
+    guildId,
   });
 }
 
 /** WebUI session URL for a guild, or null if a token couldn't be minted. */
 async function webuiUrlFor(
-  botRpc: BotRpcFn,
+  auth: Auth,
   userId: string,
   guildId: string,
 ): Promise<string | null> {
-  const token = await getSessionToken(botRpc, userId, guildId);
+  const token = await getSessionToken(auth, userId, guildId);
   return token ? `${effectiveBase()}/?token=${token}` : null;
 }
 
@@ -198,11 +198,11 @@ async function webuiUrlFor(
  *  so the JWT carries `guildId: null` — the personal routes' access anchor
  *  is the embedded userId, not a guild. */
 async function getPersonalToken(
-  botRpc: BotRpcFn,
+  auth: Auth,
   userId: string,
 ): Promise<string | null> {
-  return mintCachedToken(botRpc, personalTokens, userId, {
-    user_id: userId,
+  return mintCachedToken(auth, personalTokens, userId, {
+    userId,
     kind: "session",
     // no guild_id → guildId: null in the minted token
   });
@@ -210,10 +210,10 @@ async function getPersonalToken(
 
 /** Personal-page WebUI URL for a member, or null if a token couldn't be minted. */
 async function personalUrlFor(
-  botRpc: BotRpcFn,
+  auth: Auth,
   userId: string,
 ): Promise<string | null> {
-  const token = await getPersonalToken(botRpc, userId);
+  const token = await getPersonalToken(auth, userId);
   return token ? `${effectiveBase()}/me?token=${token}` : null;
 }
 
@@ -250,7 +250,7 @@ async function playbackReply(
   locale: Locale,
   embed: Record<string, unknown>,
 ): Promise<CommandReply> {
-  const url = await webuiUrlFor(ctx.botRpc, ctx.userId, guildId);
+  const url = await webuiUrlFor(ctx.auth, ctx.userId, guildId);
   const components = url
     ? [linkButtonRow(t(locale, "btn.openWebui"), url)]
     : undefined;
@@ -722,7 +722,7 @@ export default function buildPlugin() {
                     // your own playlists + API keys, and start a playlist
                     // in whatever voice channel you're in. The token is
                     // guildless and carries your identity, so keep it private.
-                    const url = await personalUrlFor(ctx.botRpc, userId);
+                    const url = await personalUrlFor(ctx.auth, userId);
                     if (!url) return t(locale, "error.me.tokenFailed");
                     return {
                       embeds: [
@@ -744,7 +744,7 @@ export default function buildPlugin() {
                       .status(guildId)
                       .catch(() => null);
                     const webuiUrl = await webuiUrlFor(
-                      ctx.botRpc,
+                      ctx.auth,
                       userId,
                       guildId,
                     );

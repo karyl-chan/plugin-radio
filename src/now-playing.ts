@@ -67,24 +67,21 @@ async function getSessionToken(guildId: string): Promise<string | null> {
   if (cached && cached.expiresAt - Date.now() > TOKEN_REFRESH_MARGIN_MS) {
     return cached.token;
   }
-  // auth.session has no typed wrapper in the SDK's `discord` / `voice`
-  // facades yet — fall back to the raw botRpc surface.
-  const res = (await runtime().botRpc("/api/plugin/auth.session", {
-    // `kind:"session"` tokens ship no capabilities and are authorised
-    // purely by the embedded guild_id, so the user_id is informational —
-    // there's no real "owner" of the public message.
-    user_id: `radio-np:${guildId}`,
-    kind: "session",
-    guild_id: guildId,
-    ttl_ms: TOKEN_TTL_MS,
-  }).catch(() => null)) as { token?: string; expiresAt?: number } | null;
-  if (!res || typeof res.token !== "string") return null;
+  const res = await runtime()
+    .auth.mintSession({
+      // `kind:"session"` tokens ship no capabilities and are authorised
+      // purely by the embedded guild_id, so the user_id is informational —
+      // there's no real "owner" of the public message.
+      userId: `radio-np:${guildId}`,
+      kind: "session",
+      guildId,
+      ttlMs: TOKEN_TTL_MS,
+    })
+    .catch(() => ({ allowed: false }) as const);
+  if (!res.allowed) return null;
   tokens.set(guildId, {
     token: res.token,
-    expiresAt:
-      typeof res.expiresAt === "number"
-        ? res.expiresAt
-        : Date.now() + TOKEN_TTL_MS,
+    expiresAt: res.expiresAt,
   });
   return res.token;
 }

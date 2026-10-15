@@ -29,6 +29,7 @@ wireRuntime({
   botRpc: started.botRpc,
   discord: started.discord,
   voice: started.voice,
+  auth: started.auth,
   log,
 });
 startAdvanceLoop(started.botRpc, log, seenGuilds);

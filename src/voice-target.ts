@@ -32,12 +32,7 @@ export interface Target {
  *  of voice channels across guilds the bot shares with them. Best-effort —
  *  a locate failure resolves to no matches. */
 export async function locate(userId: string): Promise<VoiceMatch[]> {
-  const res = (await runtime()
-    .botRpc("/api/plugin/voice.locate", { user_id: userId })
-    .catch(() => null)) as { matches?: VoiceMatch[] } | null;
-  return Array.isArray(res?.matches)
-    ? (res as { matches: VoiceMatch[] }).matches
-    : [];
+  return runtime().voice.locate(userId).catch(() => []);
 }
 
 /**
