@@ -1,5 +1,9 @@
 name: Publish radio image
 
+# Publishes the image to GitHub Packages (ghcr.io).
+#   push to main            -> :edge                  (local testing only)
+#   dispatch on tag v<x.y.z> -> :<x.y.z> + :latest     (what production runs)
+# release-please.yml dispatches the tag run when its release PR is merged.
 on:
   push:
     branches: [main]
@@ -57,7 +61,11 @@ jobs:
         run: |
           OWNER_LC=$(echo "${{ env.IMAGE_OWNER }}" | tr '[:upper:]' '[:lower:]')
           IMG="${{ env.REGISTRY }}/${OWNER_LC}/karyl-plugin-radio"
-          echo "tags=$IMG:edge,$IMG:latest" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tags=$IMG:${GITHUB_REF#refs/tags/v},$IMG:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=$IMG:edge" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build & push
         uses: docker/build-push-action@v6

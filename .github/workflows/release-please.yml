@@ -1,0 +1,47 @@
+name: release-please
+
+# Maintains the release PR from conventional commits on main. Merging it
+# bumps package.json + CHANGELOG, tags `v<x.y.z>` and creates a GitHub
+# release; that release is what production deploys (`:<x.y.z>` / `:latest`).
+#
+# A tag pushed under the default GITHUB_TOKEN never fires tag-listening
+# workflows (GitHub's anti-recursion rule), so when a release is created we
+# dispatch publish-image.yml against the new tag explicitly —
+# workflow_dispatch is the documented exception.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+
+  publish-image:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch publish-image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run publish-image.yml \
+            --repo ${{ github.repository }} \
+            --ref ${{ needs.release-please.outputs.tag }}
