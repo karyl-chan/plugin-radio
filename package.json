@@ -1,6 +1,6 @@
 {
   "name": "@karyl-chan/plugin-radio",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Internet radio + YouTube audio library with WebUI management.",
   "type": "module",
   "private": true,
